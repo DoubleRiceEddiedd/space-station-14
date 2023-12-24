@@ -873,3 +873,8 @@
   id: holy
   flavorType: Base
   description: flavor-base-holy
+
+- type: flavor
+  id: cotton
+  flavorType: Complex
+  description: flavor-complex-cotton

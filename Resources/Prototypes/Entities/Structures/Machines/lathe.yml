@@ -952,3 +952,27 @@
     staticRecipes:
     - MaterialSheetMeat
     - SheetPaper
+
+- type: entity
+  parent: BaseLathe
+  id: Loom
+  name: loom
+  description: Roughly welded with the wire, powered by electricity instead labour power.
+  components:
+  - type: Sprite
+    sprite: Structures/Machines/loom.rsi
+    layers:
+    - state: base_machine #currently using sheet-meister 2000 image as placeholder, change later
+      map: ["enum.LatheVisualLayers.IsRunning"]
+  - type: MaterialStorage
+    dropOnDeconstruct: false
+    ignoreColor: true
+    whitelist:
+      tags:
+      - Cotton
+  - type: Lathe
+    idleState: base_machine
+    runningState: base_machine_processing
+    canEjectStoredMaterials: false
+    staticRecipes:
+    - MaterialCloth

@@ -147,3 +147,10 @@
   completetime: 1
   materials:
     Wood: 50
+
+- type: latheRecipe
+  id: MaterialCloth
+  result: MaterialCloth
+  completetime: 4
+  materials:
+    Cloth: 3000

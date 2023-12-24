@@ -408,11 +408,14 @@
       reagents:
       - ReagentId: Fiber
         Quantity: 3
+  - type: Material
+  - type: PhysicalComposition
+    materialComposition:
+      Cloth: 100
   - type: Tag
     tags:
-      - ClothMade
+      - Cotton
       - DroneUsable
-      - RawMaterial
 
 
 - type: entity
