@@ -1,7 +1,8 @@
-﻿using System.Numerics;
+using System.Numerics;
 using Content.Shared.CardboardBox;
 using Content.Shared.CardboardBox.Components;
 using Content.Shared.Examine;
+using Content.Shared.Mobs.Components;
 using Content.Shared.Movement.Components;
 using Robust.Client.GameObjects;
 
@@ -10,10 +11,18 @@ namespace Content.Client.CardboardBox;
 public sealed class CardboardBoxSystem : SharedCardboardBoxSystem
 {
     [Dependency] private readonly EntityLookupSystem _entityLookup = default!;
+    [Dependency] private readonly TransformSystem _transform = default!;
+    [Dependency] private readonly ExamineSystemShared _examine = default!;
+    [Dependency] private readonly SpriteSystem _sprite = default!;
+
+    private EntityQuery<MobStateComponent> _mobStateQuery;
 
     public override void Initialize()
     {
         base.Initialize();
+
+        _mobStateQuery = GetEntityQuery<MobStateComponent>();
+
         SubscribeNetworkEvent<PlayBoxEffectMessage>(OnBoxEffect);
     }
 
@@ -29,7 +38,7 @@ public sealed class CardboardBoxSystem : SharedCardboardBoxSystem
         if (!xformQuery.TryGetComponent(source, out var xform))
             return;
 
-        var sourcePos = xform.MapPosition;
+        var sourcePos = _transform.GetMapCoordinates(source, xform);
 
         //Any mob that can move should be surprised?
         //God mind rework needs to come faster so it can just check for mind
@@ -53,16 +62,21 @@ public sealed class CardboardBoxSystem : SharedCardboardBoxSystem
         //Play the effect for the mobs as long as they can see the box and are in range.
         foreach (var mob in mobMoverEntities)
         {
-            if (!xformQuery.TryGetComponent(mob, out var moverTransform) || !ExamineSystemShared.InRangeUnOccluded(sourcePos, moverTransform.MapPosition, box.Distance, null))
+            var mapPos = _transform.GetMapCoordinates(mob);
+            if (!_examine.InRangeUnOccluded(sourcePos, mapPos, box.Distance, null))
                 continue;
 
-            var ent = Spawn(box.Effect, moverTransform.MapPosition);
+            // no effect for non-mobs that have MobMover, such as mechs and vehicles.
+            if (!_mobStateQuery.HasComp(mob))
+                continue;
+
+            var ent = Spawn(box.Effect, mapPos);
 
             if (!xformQuery.TryGetComponent(ent, out var entTransform) || !TryComp<SpriteComponent>(ent, out var sprite))
                 continue;
 
-            sprite.Offset = new Vector2(0, 1);
-            entTransform.AttachParent(mob);
+            _sprite.SetOffset((ent, sprite), new Vector2(0, 1));
+            _transform.SetParent(ent, entTransform, mob);
         }
 
     }

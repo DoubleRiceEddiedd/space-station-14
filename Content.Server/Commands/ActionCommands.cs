@@ -1,5 +1,6 @@
-﻿using Content.Server.Administration;
+using Content.Server.Administration;
 using Content.Shared.Actions;
+using Content.Shared.Actions.Components;
 using Content.Shared.Administration;
 using Robust.Shared.Console;
 
@@ -31,13 +32,13 @@ internal sealed class UpgradeActionCommand : IConsoleCommand
         var actionUpgrade = _entMan.EntitySysManager.GetEntitySystem<ActionUpgradeSystem>();
         var id = args[0];
 
-        if (!EntityUid.TryParse(id, out var uid))
+        if (!NetEntity.TryParse(id, out var nuid))
         {
             shell.WriteLine(Loc.GetString("upgradeaction-command-incorrect-entityuid-format"));
             return;
         }
 
-        if (!_entMan.EntityExists(uid))
+        if (!_entMan.TryGetEntity(nuid, out var uid))
         {
             shell.WriteLine(Loc.GetString("upgradeaction-command-entity-does-not-exist"));
             return;
@@ -51,7 +52,7 @@ internal sealed class UpgradeActionCommand : IConsoleCommand
 
         if (args.Length == 1)
         {
-            if (!actionUpgrade.TryUpgradeAction(uid, actionUpgradeComponent))
+            if (!actionUpgrade.TryUpgradeAction(uid, out _, actionUpgradeComponent))
             {
                 shell.WriteLine(Loc.GetString("upgradeaction-command-cannot-level-up"));
                 return;
@@ -74,7 +75,7 @@ internal sealed class UpgradeActionCommand : IConsoleCommand
                 return;
             }
 
-            if (!actionUpgrade.TryUpgradeAction(uid, actionUpgradeComponent, level))
+            if (!actionUpgrade.TryUpgradeAction(uid, out _, actionUpgradeComponent, level))
                 shell.WriteLine(Loc.GetString("upgradeaction-command-cannot-level-up"));
         }
     }

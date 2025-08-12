@@ -21,8 +21,8 @@
         id: blinking
         interpolate: Nearest
         maxDuration: 1.0
-        minValue: 0.1
-        maxValue: 2.0
+        startValue: 0.1
+        endValue: 2.0
         isLooped: true
   - type: PowerCellSlot
     cellSlotId: cell_slot
@@ -45,10 +45,14 @@
     radius: 3
     energy: 2
     netsync: false
-  - type: ToggleableLightVisuals
+  - type: ToggleableVisuals
+    spriteLayer: light
+  - type: ItemTogglePointLight
   - type: Appearance
   - type: Physics
     canCollide: false
+  - type: StealTarget
+    stealGroup: LAMP
 
 - type: entity
   name: lamp
@@ -60,12 +64,24 @@
     sprite: Objects/Misc/Lights/lamp.rsi
     layers:
       - state: lamp
+        map: [ "base" ]
       - state: lamp-on
         shader: unshaded
         visible: false
         map: [ "light" ]
   - type: Item
     sprite: Objects/Misc/Lights/lamp.rsi
+  - type: HolidayVisuals
+    holidays:
+      festive:
+      - FestiveSeason
+  - type: GenericVisualizer
+    visuals:
+      enum.HolidayVisuals.Holiday:
+        base:
+          festive: { state: christmaslamp }
+        light:
+          festive: { state: christmaslamp-on }
 
 - type: entity
   name: banana lamp
@@ -91,30 +107,46 @@
     sprite: Objects/Misc/Lights/lampgreen.rsi
     layers:
       - state: lampgreen
+        map: [ "base" ]
       - state: lampgreen-on
         shader: unshaded
         visible: false
         map: [ "light" ]
   - type: Item
     sprite: Objects/Misc/Lights/lampgreen.rsi
+  - type: HolidayVisuals
+    holidays:
+      festive:
+      - FestiveSeason
+  - type: GenericVisualizer
+    visuals:
+      enum.HolidayVisuals.Holiday:
+        base:
+          festive:
+            sprite: Objects/Misc/Lights/lamp.rsi
+            state: christmaslamp
+        light:
+          festive:
+            sprite: Objects/Misc/Lights/lamp.rsi
+            state: christmaslamp-on
 
 - type: entity
   name: interrogator lamp
   id: LampInterrogator
-  parent: BaseLamp
-  description: Ultra-bright lamp for the bad cop
+  parent: [ BaseLamp, BaseSecurityContraband ]
+  description: Ultra-bright lamp for the bad cop.
   components:
   - type: Sprite
     sprite: Objects/Misc/Lights/lampint.rsi
     layers:
       - state: lamp-int
-        map: [ "enum.FlashVisuals.BaseLayer" ]
+        map: [ "enum.FlashVisualLayers.BaseLayer" ]
       - state: lamp-int-on
         shader: unshaded
         visible: false
         map: [ "light" ]
       - state: flashing
-        map: [ "enum.FlashVisuals.LightLayer" ]
+        map: [ "enum.FlashVisualLayers.LightLayer" ]
         visible: false
   - type: Item
     sprite: Objects/Misc/Lights/lampint.rsi
@@ -127,12 +159,16 @@
     energy: 0.5
     color: "#FFFFEE"
   - type: Flash
+    flashOnMelee: false
+    flashOnUse: false
+  - type: UseDelay
+    delay: 1
   - type: LimitedCharges
     maxCharges: 3
-    charges: 3
   - type: AutoRecharge
     rechargeDuration: 30
   - type: MeleeWeapon
+    wideAnimationRotation: 180
     damage:
       types:
         Blunt: 0 # melee weapon to allow flashing individual targets
@@ -144,10 +180,10 @@
   - type: GenericVisualizer
     visuals:
       enum.FlashVisuals.Burnt:
-        enum.FlashVisuals.BaseLayer:
+        enum.FlashVisualLayers.BaseLayer:
           True: {state: burnt}
       enum.FlashVisuals.Flashing:
-        enum.FlashVisuals.LightLayer:
+        enum.FlashVisualLayers.LightLayer:
           True: {visible: true}
           False: {visible: false}
 
@@ -160,9 +196,11 @@
   - type: Item
     size: Normal
   - type: Sprite
+    sprite: Objects/Misc/Lights/lights.rsi
     layers:
       - state: floodlight
-      - state: floodlight_on
+        map: [ "base" ]
+      - state: floodlight-on
         shader: unshaded
         visible: false
         map: [ "light" ]
@@ -176,16 +214,19 @@
           bounds: "-0.2, -0.5, 0.2, 0.5"
         density: 50
         mask:
-        - MachineMask
-        layer:
-        - MachineLayer
+        - HighImpassable
   - type: PointLight
     enabled: false
     radius: 8
     energy: 5
+  - type: ItemSlots
+    slots:
+      cell_slot:
+        name: power-cell-slot-component-slot-name-default
+        startingItem: PowerCellMedium
   - type: Anchorable
   - type: Damageable
-    damageContainer: Inorganic
+    damageContainer: StructuralInorganic
     damageModifierSet: Metallic
   - type: Destructible
     thresholds:
@@ -195,7 +236,7 @@
       behaviors:
       - !type:PlaySoundBehavior
         sound:
-          path: /Audio/Effects/glass_break1.ogg
+          collection: GlassBreak
       - !type:SpawnEntitiesBehavior
         spawn:
           FloodlightBroken:
@@ -203,19 +244,26 @@
             max: 1
       - !type:DoActsBehavior
         acts: [ "Destruction" ]
-
+  - type: PhysicalComposition
+    materialComposition:
+      Glass: 500
+      Steel: 200
 - type: entity
   name: broken floodlight
   id: FloodlightBroken
   parent: BaseItem
   description: A pole with powerful mounted lights on it. It's broken.
   components:
+  - type: Item
+    size: Normal
+    sprite: Objects/Misc/Lights/lights.rsi
+    heldPrefix: floodlight-broken
   - type: Sprite
     sprite: Objects/Misc/Lights/lights.rsi
-    state: floodlight_broken
+    state: floodlight-broken
   - type: Anchorable
   - type: Damageable
-    damageContainer: Inorganic
+    damageContainer: StructuralInorganic
     damageModifierSet: Metallic
   - type: Destructible
     thresholds:
@@ -231,7 +279,7 @@
       behaviors:
       - !type:PlaySoundBehavior
         sound:
-          path: /Audio/Effects/metalbreak.ogg
+          collection: MetalGlassBreak
       - !type:SpawnEntitiesBehavior
         spawn:
           SheetSteel1:
@@ -248,6 +296,8 @@
           bounds: "-0.2, -0.5, 0.2, 0.5"
         density: 50
         mask:
-        - MachineMask
-        layer:
-        - MachineLayer
+        - HighImpassable
+  - type: PhysicalComposition
+    materialComposition:
+      Glass: 500
+      Steel: 200

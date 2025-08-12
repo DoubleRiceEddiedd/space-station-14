@@ -9,7 +9,7 @@ namespace Content.Shared.Sericulture;
 /// Should be applied to any mob that you want to be able to produce any material with an action and the cost of hunger.
 /// TODO: Probably adjust this to utilize organs?
 /// </summary>
-[RegisterComponent, NetworkedComponent, Access(typeof(SharedSericultureSystem))]
+[RegisterComponent, NetworkedComponent, Access(typeof(SharedSericultureSystem)), AutoGenerateComponentState]
 public sealed partial class SericultureComponent : Component
 {
     /// <summary>
@@ -31,10 +31,10 @@ public sealed partial class SericultureComponent : Component
     /// <summary>
     /// The entity needed to actually preform sericulture. This will be granted (and removed) upon the entity's creation.
     /// </summary>
-    [DataField(required: true)]
+    [DataField]
     [ViewVariables(VVAccess.ReadWrite)]
     [AutoNetworkedField]
-    public EntProtoId Action;
+    public EntProtoId Action = "ActionSericulture";
 
     [AutoNetworkedField]
     [DataField("actionEntity")]

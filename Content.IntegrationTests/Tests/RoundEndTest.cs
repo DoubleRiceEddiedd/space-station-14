@@ -1,4 +1,3 @@
-using System.Threading;
 using Content.Server.GameTicking;
 using Content.Server.RoundEnd;
 using Content.Shared.CCVar;
@@ -8,8 +7,24 @@ using Robust.Shared.GameObjects;
 namespace Content.IntegrationTests.Tests
 {
     [TestFixture]
-    public sealed class RoundEndTest : IEntityEventSubscriber
+    public sealed class RoundEndTest
     {
+        private sealed class RoundEndTestSystem : EntitySystem
+        {
+            public int RoundCount;
+
+            public override void Initialize()
+            {
+                base.Initialize();
+                SubscribeLocalEvent<RoundEndSystemChangedEvent>(OnRoundEnd);
+            }
+
+            private void OnRoundEnd(RoundEndSystemChangedEvent ev)
+            {
+                RoundCount += 1;
+            }
+        }
+
         [Test]
         public async Task Test()
         {
@@ -22,13 +37,12 @@ namespace Content.IntegrationTests.Tests
 
             var server = pair.Server;
 
-            var entManager = server.ResolveDependency<IEntityManager>();
             var config = server.ResolveDependency<IConfigurationManager>();
             var sysManager = server.ResolveDependency<IEntitySystemManager>();
             var ticker = sysManager.GetEntitySystem<GameTicker>();
             var roundEndSystem = sysManager.GetEntitySystem<RoundEndSystem>();
-
-            var eventCount = 0;
+            var sys = server.System<RoundEndTestSystem>();
+            sys.RoundCount = 0;
 
             await server.WaitAssertion(() =>
             {
@@ -43,11 +57,6 @@ namespace Content.IntegrationTests.Tests
 
             await server.WaitAssertion(() =>
             {
-                var bus = entManager.EventBus;
-                bus.SubscribeEvent<RoundEndSystemChangedEvent>(EventSource.Local, this, _ =>
-                {
-                    Interlocked.Increment(ref eventCount);
-                });
 
                 // Press the shuttle call button
                 roundEndSystem.RequestRoundEnd();
@@ -117,13 +126,17 @@ namespace Content.IntegrationTests.Tests
 
             async Task WaitForEvent()
             {
-                var timeout = Task.Delay(TimeSpan.FromSeconds(10));
-                var currentCount = Thread.VolatileRead(ref eventCount);
-                while (currentCount == Thread.VolatileRead(ref eventCount) && !timeout.IsCompleted)
+                const int maxTicks = 60;
+                var currentCount = sys.RoundCount;
+                for (var i = 0; i < maxTicks; i++)
                 {
-                    await pair.RunTicksSync(5);
+                    if (currentCount != sys.RoundCount)
+                        return;
+
+                    await pair.RunTicksSync(1);
                 }
-                if (timeout.IsCompleted) throw new TimeoutException("Event took too long to trigger");
+
+                throw new TimeoutException("Event took too long to trigger");
             }
 
             // Need to clean self up

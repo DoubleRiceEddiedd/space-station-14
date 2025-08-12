@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Numerics;
 using Robust.Client.Graphics;
 using Robust.Client.ResourceManagement;
 using Robust.Shared.ContentPack;
@@ -20,15 +21,18 @@ namespace Content.MapRenderer.Painters
         public const int TileImageSize = EyeManager.PixelsPerMeter;
 
         private readonly ITileDefinitionManager _sTileDefinitionManager;
+        private readonly SharedMapSystem _sMapSystem;
         private readonly IResourceManager _resManager;
 
         public TilePainter(ClientIntegrationInstance client, ServerIntegrationInstance server)
         {
             _sTileDefinitionManager = server.ResolveDependency<ITileDefinitionManager>();
             _resManager = client.ResolveDependency<IResourceManager>();
+            var esm = server.ResolveDependency<IEntitySystemManager>();
+            _sMapSystem = esm.GetEntitySystem<SharedMapSystem>();
         }
 
-        public void Run(Image gridCanvas, EntityUid gridUid, MapGridComponent grid)
+        public void Run(Image gridCanvas, EntityUid gridUid, MapGridComponent grid, Vector2 customOffset = default)
         {
             var stopwatch = new Stopwatch();
             stopwatch.Start();
@@ -41,16 +45,36 @@ namespace Content.MapRenderer.Painters
             var images = GetTileImages(_sTileDefinitionManager, _resManager, tileSize);
             var i = 0;
 
-            grid.GetAllTiles().AsParallel().ForAll(tile =>
+            _sMapSystem.GetAllTiles(gridUid, grid).AsParallel().ForAll(tile =>
             {
                 var path = _sTileDefinitionManager[tile.Tile.TypeId].Sprite.ToString();
 
                 if (string.IsNullOrWhiteSpace(path))
                     return;
 
-                var x = (int) (tile.X + xOffset);
-                var y = (int) (tile.Y + yOffset);
-                var image = images[path][tile.Tile.Variant];
+                var x = (int) (tile.X + xOffset + customOffset.X);
+                var y = (int) (tile.Y + yOffset + customOffset.Y);
+                var image = images[path][tile.Tile.Variant].CloneAs<Rgba32>();
+
+                switch (tile.Tile.RotationMirroring % 4)
+                {
+                    case 0:
+                        break;
+                    case 1:
+                        image.Mutate(o => o.Rotate(90f));
+                        break;
+                    case 2:
+                        image.Mutate(o => o.Rotate(180f));
+                        break;
+                    case 3:
+                        image.Mutate(o => o.Rotate(270f));
+                        break;
+                }
+
+                if (tile.Tile.RotationMirroring > 3)
+                {
+                    image.Mutate(o => o.Flip(FlipMode.Horizontal));
+                }
 
                 gridCanvas.Mutate(o => o.DrawImage(image, new Point(x * tileSize, y * tileSize), 1));
 
@@ -90,7 +114,7 @@ namespace Content.MapRenderer.Painters
                 for (var i = 0; i < definition.Variants; i++)
                 {
                     var index = i;
-                    var tileImage = tileSheet.Clone(o => o.Crop(new Rectangle(tileSize * index, 0, 32, 32)));
+                    var tileImage = tileSheet.Clone(o => o.Crop(new Rectangle(tileSize * index, 0, 32, 32)).Flip(FlipMode.Vertical));
                     images[path].Add(tileImage);
                 }
             }

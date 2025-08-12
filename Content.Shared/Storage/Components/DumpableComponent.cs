@@ -1,4 +1,5 @@
 using Content.Shared.DoAfter;
+using Content.Shared.Storage.EntitySystems;
 using Robust.Shared.Audio;
 using Robust.Shared.GameStates;
 using Robust.Shared.Serialization;
@@ -24,7 +25,7 @@ public sealed partial class DumpableComponent : Component
     /// How long each item adds to the doafter.
     /// </summary>
     [DataField("delayPerItem"), AutoNetworkedField]
-    public TimeSpan DelayPerItem = TimeSpan.FromSeconds(0.2);
+    public TimeSpan DelayPerItem = TimeSpan.FromSeconds(SharedStorageSystem.AreaInsertDelayPerItem);
 
     /// <summary>
     /// The multiplier modifier
@@ -32,3 +33,15 @@ public sealed partial class DumpableComponent : Component
     [DataField("multiplier"), AutoNetworkedField]
     public float Multiplier = 1.0f;
 }
+
+/// <summary>
+/// Event raised on Dumpable entities to get the verb for dumping
+/// </summary>
+[ByRefEvent]
+public record struct GetDumpableVerbEvent(EntityUid User, string? Verb);
+
+/// <summary>
+/// Event raised on Dumpable entities to complete the dump
+/// </summary>
+[ByRefEvent]
+public record struct DumpEvent(Queue<EntityUid> DumpQueue, EntityUid User, bool PlaySound, bool Handled);

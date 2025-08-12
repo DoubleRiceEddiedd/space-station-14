@@ -1,9 +1,7 @@
-﻿using System.Linq;
-using Content.Server.DeviceNetwork.Components;
-using Content.Shared.DeviceNetwork;
+using System.Linq;
 using Content.Shared.DeviceNetwork.Components;
+using Content.Shared.DeviceNetwork.Events;
 using Content.Shared.DeviceNetwork.Systems;
-using Content.Shared.Interaction;
 using JetBrains.Annotations;
 using Robust.Shared.Map.Events;
 
@@ -12,8 +10,6 @@ namespace Content.Server.DeviceNetwork.Systems;
 [UsedImplicitly]
 public sealed class DeviceListSystem : SharedDeviceListSystem
 {
-    private ISawmill _sawmill = default!;
-
     [Dependency] private readonly NetworkConfiguratorSystem _configurator = default!;
 
     public override void Initialize()
@@ -22,8 +18,7 @@ public sealed class DeviceListSystem : SharedDeviceListSystem
         SubscribeLocalEvent<DeviceListComponent, ComponentShutdown>(OnShutdown);
         SubscribeLocalEvent<DeviceListComponent, BeforeBroadcastAttemptEvent>(OnBeforeBroadcast);
         SubscribeLocalEvent<DeviceListComponent, BeforePacketSentEvent>(OnBeforePacketSent);
-        SubscribeLocalEvent<BeforeSaveEvent>(OnMapSave);
-        _sawmill = Logger.GetSawmill("devicelist");
+        SubscribeLocalEvent<BeforeSerializationEvent>(OnMapSave);
     }
 
     private void OnShutdown(EntityUid uid, DeviceListComponent component, ComponentShutdown args)
@@ -92,7 +87,8 @@ public sealed class DeviceListSystem : SharedDeviceListSystem
         //Don't filter anything if the device list is empty
         if (component.Devices.Count == 0)
         {
-            if (component.IsAllowList) args.Cancel();
+            if (component.IsAllowList)
+                args.Cancel();
             return;
         }
 
@@ -100,7 +96,8 @@ public sealed class DeviceListSystem : SharedDeviceListSystem
 
         foreach (var recipient in args.Recipients)
         {
-            if (component.Devices.Contains(recipient.Owner) == component.IsAllowList) filteredRecipients.Add(recipient);
+            if (component.Devices.Contains(recipient.Owner) == component.IsAllowList)
+                filteredRecipients.Add(recipient);
         }
 
         args.ModifiedRecipients = filteredRecipients;
@@ -125,14 +122,14 @@ public sealed class DeviceListSystem : SharedDeviceListSystem
         Dirty(list);
     }
 
-    private void OnMapSave(BeforeSaveEvent ev)
+    private void OnMapSave(BeforeSerializationEvent ev)
     {
         List<EntityUid> toRemove = new();
         var query = GetEntityQuery<TransformComponent>();
         var enumerator = AllEntityQuery<DeviceListComponent, TransformComponent>();
         while (enumerator.MoveNext(out var uid, out var device, out var xform))
         {
-            if (xform.MapUid != ev.Map)
+            if (!ev.MapIds.Contains(xform.MapID))
                 continue;
 
             foreach (var ent in device.Devices)
@@ -145,14 +142,17 @@ public sealed class DeviceListSystem : SharedDeviceListSystem
                     continue;
                 }
 
-                if (linkedXform.MapUid == ev.Map)
+                // This is assuming that **all** of the map is getting saved.
+                // Which is not necessarily true.
+                // AAAAAAAAAAAAAA
+                if (ev.MapIds.Contains(linkedXform.MapID))
                     continue;
 
                 toRemove.Add(ent);
                 // TODO full game saves.
                 // when full saves are supported, this should instead add data to the BeforeSaveEvent informing the
                 // saving system that this map (or null-space entity) also needs to be included in the save.
-                _sawmill.Error(
+                Log.Error(
                     $"Saving a device list ({ToPrettyString(uid)}) that has a reference to an entity on another map ({ToPrettyString(ent)}). Removing entity from list.");
             }
 
@@ -162,7 +162,7 @@ public sealed class DeviceListSystem : SharedDeviceListSystem
             var old = device.Devices.ToList();
             device.Devices.ExceptWith(toRemove);
             RaiseLocalEvent(uid, new DeviceListUpdateEvent(old, device.Devices.ToList()));
-            Dirty(device);
+            Dirty(uid, device);
             toRemove.Clear();
         }
     }

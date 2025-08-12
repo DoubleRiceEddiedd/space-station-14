@@ -4,6 +4,7 @@ using Content.Shared.Audio;
 using Content.Shared.CCVar;
 using Content.Shared.GameTicking;
 using Content.Shared.Random;
+using Content.Shared.Random.Rules;
 using Robust.Client.GameObjects;
 using Robust.Client.Player;
 using Robust.Client.ResourceManagement;
@@ -26,7 +27,6 @@ public sealed partial class ContentAudioSystem
     [Dependency] private readonly IGameTiming _timing = default!;
     [Dependency] private readonly IPlayerManager _player = default!;
     [Dependency] private readonly IPrototypeManager _proto = default!;
-    [Dependency] private readonly IResourceCache _resource = default!;
     [Dependency] private readonly IRobustRandom _random = default!;
     [Dependency] private readonly IStateManager _state = default!;
     [Dependency] private readonly RulesSystem _rules = default!;
@@ -60,7 +60,7 @@ public sealed partial class ContentAudioSystem
 
     private void InitializeAmbientMusic()
     {
-        _configManager.OnValueChanged(CCVars.AmbientMusicVolume, AmbienceCVarChanged, true);
+        Subs.CVar(_configManager, CCVars.AmbientMusicVolume, AmbienceCVarChanged, true);
         _sawmill = IoCManager.Resolve<ILogManager>().GetSawmill("audio.ambience");
 
         // Reset audio
@@ -85,7 +85,6 @@ public sealed partial class ContentAudioSystem
 
     private void ShutdownAmbientMusic()
     {
-        _configManager.UnsubValueChanged(CCVars.AmbientMusicVolume, AmbienceCVarChanged);
         _state.OnStateChanged -= OnStateChange;
         _ambientMusicStream = _audio.Stop(_ambientMusicStream);
     }
@@ -153,8 +152,7 @@ public sealed partial class ContentAudioSystem
         // Update still runs in lobby so just ignore it.
         if (_state.CurrentState is not GameplayState)
         {
-            Audio.Stop(_ambientMusicStream);
-            _ambientMusicStream = null;
+            _ambientMusicStream = Audio.Stop(_ambientMusicStream);
             _musicProto = null;
             return;
         }
@@ -215,9 +213,9 @@ public sealed partial class ContentAudioSystem
             false,
             AudioParams.Default.WithVolume(_musicProto.Sound.Params.Volume + _volumeSlider));
 
-        _ambientMusicStream = strim.Value.Entity;
+        _ambientMusicStream = strim?.Entity;
 
-        if (_musicProto.FadeIn)
+        if (_musicProto.FadeIn && strim != null)
         {
             FadeIn(_ambientMusicStream, strim.Value.Component, AmbientMusicFadeTime);
         }
@@ -231,7 +229,7 @@ public sealed partial class ContentAudioSystem
 
     private AmbientMusicPrototype? GetAmbience()
     {
-        var player = _player.LocalPlayer?.ControlledEntity;
+        var player = _player.LocalEntity;
 
         if (player == null)
             return null;

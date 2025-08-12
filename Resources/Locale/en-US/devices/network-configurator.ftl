@@ -26,6 +26,12 @@ network-configurator-title-device-configuration = Device Configuration
 network-configurator-ui-clear-button = Clear
 network-configurator-ui-count-label = {$count} Devices
 
+network-configurator-text-set = Set
+network-configurator-text-add = Add
+network-configurator-text-clear = Clear
+network-configurator-text-copy = Copy
+network-configurator-text-show = Show
+
 # tooltips
 network-configurator-tooltip-set = Sets targets device list
 network-configurator-tooltip-add = Adds to targets device list
@@ -41,5 +47,9 @@ network-configurator-examine-current-mode = Current mode: {$mode}
 network-configurator-examine-switch-modes = Press {$key} to switch modes
 
 # item status
-network-configurator-item-status-label = Current mode: {$mode}
-{$keybinding} to switch mode
+network-configurator-item-status-label = Mode: {$mode}
+    Switch: {$keybinding}
+
+# command
+cmd-clearnetworklinkoverlays-desc = Clear all network link overlays.
+cmd-clearnetworklinkoverlays-help = Usage: clearnetworklinkoverlays

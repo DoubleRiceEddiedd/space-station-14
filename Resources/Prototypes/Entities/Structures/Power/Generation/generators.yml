@@ -40,6 +40,11 @@
       output:
         !type:CableDeviceNode
         nodeGroupID: HVPower
+  - type: PowerMonitoringDevice
+    group: Generator
+    loadNode: output
+    sprite: Structures/Power/power.rsi
+    state: generator
   - type: PowerSupplier
     supplyRate: 3000
     supplyRampRate: 500
@@ -47,8 +52,9 @@
   - type: Anchorable
   - type: Pullable
   - type: Damageable
-    damageContainer: Inorganic
+    damageContainer: StructuralInorganic
     damageModifierSet: Metallic
+  - type: PacifismDangerousAttack
   - type: Destructible
     thresholds:
     - trigger:
@@ -65,7 +71,7 @@
         acts: ["Destruction"]
       - !type:PlaySoundBehavior
         sound:
-          path: /Audio/Effects/metalbreak.ogg
+          collection: MetalBreak
       - !type:ExplodeBehavior
   - type: Explosive
     explosionType: Default
@@ -81,17 +87,18 @@
     onBump: false
     requirePower: true
     highVoltageNode: output
+  - type: GuideHelp
+    guides:
+    - ShuttleCraft
 
 # Base Wallmount Generator
 
 - type: entity
   abstract: true
   id: BaseGeneratorWallmount
-  parent: BaseGenerator
+  parent: [ BaseGenerator, BaseWallmount ]
   name: wallmount generator
   description: A high efficiency thermoelectric generator stuffed in a wall cabinet.
-  placement:
-    mode: SnapgridCenter
   components:
   - type: AmbientOnPowered
   - type: AmbientSound
@@ -105,12 +112,6 @@
     color: "#3db83b"
     castShadows: false
     netsync: false
-  - type: Fixtures
-  - type: Transform
-    anchored: true
-  - type: Physics
-    bodyType: Static
-    canCollide: false
   - type: Sprite
     drawdepth: WallMountedItems
     sprite: Structures/Power/Generation/wallmount_generator.rsi
@@ -124,29 +125,28 @@
       output:
         !type:CableDeviceNode
         nodeGroupID: HVPower
+  - type: PowerMonitoringDevice
+    group: Generator
+    loadNode: output
+    sprite: Structures/Power/Generation/wallmount_generator.rsi
+    state: static
   - type: PowerSupplier
     supplyRate: 3000
     supplyRampRate: 500
     supplyRampTolerance: 500
-  - type: WallMount
+  - type: GuideHelp
+    guides:
+    - ShuttleCraft
 
 # Construction Frames
 
 - type: entity
-  noSpawn: true
+  parent: BaseWallmountMetallic
+  categories: [ HideSpawnMenu ]
   id: BaseGeneratorWallmountFrame
   name: wallmount generator frame
   description: A construction frame for a wallmount generator.
-  placement:
-    mode: SnapgridCenter
   components:
-  - type: Clickable
-  - type: InteractionOutline
-  - type: Physics
-    canCollide: false
-  - type: Fixtures
-  - type: Transform
-    anchored: true
   - type: Sprite
     drawdepth: WallMountedItems
     sprite: Structures/Power/Generation/wallmount_generator.rsi
@@ -155,7 +155,6 @@
   - type: Construction
     graph: WallmountGenerator
     node: frame
-  - type: WallMount
 
 # Generators in use
 
@@ -214,6 +213,9 @@
   - type: ContainerContainer
     containers:
       board: !type:Container
+  - type: GuideHelp
+    guides:
+    - ShuttleCraft
 
 # RTG - no fuel requirement
 
@@ -229,10 +231,17 @@
   - type: Sprite
     sprite: Structures/Power/Generation/rtg.rsi
     state: rtg
+  - type: PowerMonitoringDevice
+    sprite: Structures/Power/Generation/rtg.rsi
+    state: rtg
   - type: AmbientSound
     range: 5
     sound:
       path: /Audio/Ambience/Objects/buzzing.ogg
+  - type: GuideHelp
+    guides:
+    - RTG
+    - Power
   - type: Destructible
     thresholds:
       - trigger:
@@ -247,7 +256,7 @@
         behaviors:
           - !type:PlaySoundBehavior
             sound:
-              path: /Audio/Effects/metalbreak.ogg
+              collection: MetalBreak
           - !type:SpawnEntitiesBehavior
             spawn:
               GeneratorRTGDamaged:
@@ -272,6 +281,9 @@
     layers:
       - state: rtg_damaged
       - state: rtg_glow
+  - type: PowerMonitoringDevice
+    sprite: Structures/Power/Generation/rtg.rsi
+    state: rtg_damaged
   - type: RadiationSource # ideally only when opened.
     intensity: 2
   - type: Destructible
@@ -288,7 +300,7 @@
       behaviors:
       - !type:PlaySoundBehavior
         sound:
-          path: /Audio/Effects/metalbreak.ogg
+          collection: MetalBreak
       - !type:SpawnEntitiesBehavior
         spawn:
           SheetSteel1:

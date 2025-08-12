@@ -8,9 +8,6 @@
     state: rods
   - type: Item
     sprite: Objects/Materials/parts.rsi
-  - type: Tag
-    tags:
-      - DroneUsable
   - type: Damageable
     damageContainer: Inorganic
     damageModifierSet: FlimsyMetallic
@@ -26,7 +23,7 @@
 - type: entity
   parent: PartBase
   id: PartRodMetal
-  name: metal rods
+  name: metal rod
   suffix: Full
   components:
   - type: PhysicalComposition
@@ -48,7 +45,7 @@
       map: ["base"]
   - type: Item
     size: Normal
-#    heldPrefix: rods
+    heldPrefix: rods
   - type: Construction
     graph: MetalRod
     node: MetalRod
@@ -60,7 +57,7 @@
   - type: StaticPrice
     price: 0
   - type: StackPrice
-    price: 5
+    price: 7.5
   - type: Extractable
     grindableSolutionName: rod
   - type: SolutionContainerManager
@@ -71,6 +68,9 @@
           Quantity: 4.5
         - ReagentId: Carbon
           Quantity: 0.5
+  - type: GuideHelp
+    guides:
+    - ExpandingRepairingStation
 
 - type: entity
   parent: PartRodMetal
@@ -81,7 +81,6 @@
   - type: Tag
     tags:
     - RodMetal1
-    - DroneUsable
   - type: Sprite
     state: rods
   - type: Stack
@@ -96,7 +95,6 @@
   - type: Tag
     tags:
     - RodMetal1
-    - DroneUsable
   - type: Sprite
     state: rods
   - type: Stack
@@ -105,6 +103,33 @@
 - type: entity
   parent: PartRodMetal
   id: PartRodMetalLingering0
+  suffix: Lingering, 0
+  components:
+  - type: Stack
+    lingering: true
+    count: 0
+
+- type: entity
+  parent: FloorTileItemSteel
+  id: FloorTileItemSteelLingering0
+  suffix: Lingering, 0
+  components:
+  - type: Stack
+    lingering: true
+    count: 0
+
+- type: entity
+  parent: FloorTileItemWhite
+  id: FloorTileItemWhiteLingering0
+  suffix: Lingering, 0
+  components:
+  - type: Stack
+    lingering: true
+    count: 0
+
+- type: entity
+  parent: FloorTileItemDark
+  id: FloorTileItemDarkLingering0
   suffix: Lingering, 0
   components:
   - type: Stack

@@ -1,19 +1,14 @@
 - type: gameMapPool
   id: DefaultMapPool
   maps:
-  - Aspid
-  - Atlas
+  - Amber
   - Bagel
-  - Barratry
   - Box
-  - Cluster
-  - Core
+  - Elkridge
   - Fland
-  - Gemini
   - Marathon
-  - Meta
-  - Omega
-  - Origin
-  - Saltern
+  - Oasis
   - Packed
+  - Plasma
   - Reach
+  - Exo

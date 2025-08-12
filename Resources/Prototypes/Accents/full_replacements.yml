@@ -143,3 +143,67 @@
   - accent-words-slimes-3
   - accent-words-slimes-4
   - accent-words-slimes-5
+
+- type: accent
+  id: crab
+  fullReplacements:
+  - accent-words-crab-1
+  - accent-words-crab-2
+  - accent-words-crab-3
+  - accent-words-crab-4
+  - accent-words-crab-5
+  - accent-words-crab-6
+
+- type: accent
+  id: kobold
+  fullReplacements:
+  - accent-words-kobold-1
+  - accent-words-kobold-2
+  - accent-words-kobold-3
+  - accent-words-kobold-4
+  - accent-words-kobold-5
+  - accent-words-kobold-6
+  - accent-words-kobold-7
+  - accent-words-kobold-8
+  - accent-words-kobold-9
+
+- type: accent
+  id: nymph
+  fullReplacements:
+  - accent-words-nymph-1
+  - accent-words-nymph-2
+  - accent-words-nymph-3
+  - accent-words-nymph-4
+
+- type: accent
+  id: tomatoKiller
+  fullReplacements:
+  - accent-words-tomato-1
+  - accent-words-tomato-2
+  - accent-words-tomato-3
+  - accent-words-tomato-4
+  - accent-words-tomato-5
+
+- type: accent
+  id: scurret
+  fullReplacements:
+  - accent-words-scurret-1
+  - accent-words-scurret-2
+  - accent-words-scurret-3
+  - accent-words-scurret-4
+  - accent-words-scurret-5
+  - accent-words-scurret-6
+  - accent-words-scurret-7
+  - accent-words-scurret-8
+  - accent-words-scurret-9
+  - accent-words-scurret-10
+  - accent-words-scurret-11
+  - accent-words-scurret-12
+  - accent-words-scurret-13
+  - accent-words-scurret-14
+  - accent-words-scurret-15
+  - accent-words-scurret-16
+  - accent-words-scurret-17
+  - accent-words-scurret-18
+  - accent-words-scurret-19
+  - accent-words-scurret-20

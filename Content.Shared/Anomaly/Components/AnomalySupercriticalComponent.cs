@@ -8,6 +8,7 @@ namespace Content.Shared.Anomaly.Components;
 /// </summary>
 [RegisterComponent, NetworkedComponent, AutoGenerateComponentState]
 [Access(typeof(SharedAnomalySystem))]
+[AutoGenerateComponentPause]
 public sealed partial class AnomalySupercriticalComponent : Component
 {
     /// <summary>
@@ -15,14 +16,8 @@ public sealed partial class AnomalySupercriticalComponent : Component
     /// </summary>
     [DataField(customTypeSerializer: typeof(TimeOffsetSerializer)), AutoNetworkedField]
     [ViewVariables(VVAccess.ReadWrite)]
+    [AutoPausedField]
     public TimeSpan EndTime;
-
-    /// <summary>
-    /// The length of the animation before it goes supercritical.
-    /// </summary>
-    [AutoNetworkedField]
-    [ViewVariables(VVAccess.ReadWrite)]
-    public TimeSpan SupercriticalDuration = TimeSpan.FromSeconds(10);
 
     /// <summary>
     /// The maximum size the anomaly scales to while going supercritical

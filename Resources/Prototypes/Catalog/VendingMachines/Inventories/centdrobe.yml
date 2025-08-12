@@ -15,4 +15,9 @@
     ClothingMaskGasCentcom: 3
     ClothingHeadsetCentCom: 3
     ClothingOuterWinterCentcom: 3
+    ClothingOuterCoatExpensive: 1
     ClothingNeckScarfStripedCentcom: 3
+    ClothingNeckCloakCentcom: 3
+  contrabandInventory:
+    ToyFigurineCaptain: 1
+    ToyFigurineHeadOfPersonnel: 1

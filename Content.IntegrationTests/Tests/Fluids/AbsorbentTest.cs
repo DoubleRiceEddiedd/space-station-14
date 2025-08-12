@@ -33,6 +33,7 @@ public sealed class AbsorbentTest
   id: {AbsorbentDummyId}
   components:
   - type: Absorbent
+    useAbsorberSolution: true
   - type: SolutionContainerManager
     solutions:
       absorbed:
@@ -80,7 +81,7 @@ public sealed class AbsorbentTest
 
         var entityManager = server.ResolveDependency<IEntityManager>();
         var absorbentSystem = entityManager.System<AbsorbentSystem>();
-        var solutionContainerSystem = entityManager.System<SolutionContainerSystem>();
+        var solutionContainerSystem = entityManager.System<SharedSolutionContainerSystem>();
         var prototypeManager = server.ResolveDependency<IPrototypeManager>();
 
         EntityUid user = default;
@@ -94,22 +95,22 @@ public sealed class AbsorbentTest
             refillable = entityManager.SpawnEntity(RefillableDummyId, coordinates);
 
             entityManager.TryGetComponent(absorbent, out component);
-            solutionContainerSystem.TryGetSolution(absorbent, AbsorbentComponent.SolutionName, out var absorbentSolution);
-            solutionContainerSystem.TryGetRefillableSolution(refillable, out var refillableSolution);
+            solutionContainerSystem.TryGetSolution(absorbent, component.SolutionName, out var absorbentSoln, out var absorbentSolution);
+            solutionContainerSystem.TryGetRefillableSolution(refillable, out var refillableSoln, out var refillableSolution);
 
             // Arrange
             if (testCase.InitialAbsorbentSolution.VolumeOfEvaporable > FixedPoint2.Zero)
-                solutionContainerSystem.AddSolution(absorbent, absorbentSolution, new Solution(EvaporablePrototypeId, testCase.InitialAbsorbentSolution.VolumeOfEvaporable));
+                solutionContainerSystem.AddSolution(absorbentSoln.Value, new Solution(EvaporablePrototypeId, testCase.InitialAbsorbentSolution.VolumeOfEvaporable));
             if (testCase.InitialAbsorbentSolution.VolumeOfNonEvaporable > FixedPoint2.Zero)
-                solutionContainerSystem.AddSolution(absorbent, absorbentSolution, new Solution(NonEvaporablePrototypeId, testCase.InitialAbsorbentSolution.VolumeOfNonEvaporable));
+                solutionContainerSystem.AddSolution(absorbentSoln.Value, new Solution(NonEvaporablePrototypeId, testCase.InitialAbsorbentSolution.VolumeOfNonEvaporable));
 
             if (testCase.InitialRefillableSolution.VolumeOfEvaporable > FixedPoint2.Zero)
-                solutionContainerSystem.AddSolution(refillable, refillableSolution, new Solution(EvaporablePrototypeId, testCase.InitialRefillableSolution.VolumeOfEvaporable));
+                solutionContainerSystem.AddSolution(refillableSoln.Value, new Solution(EvaporablePrototypeId, testCase.InitialRefillableSolution.VolumeOfEvaporable));
             if (testCase.InitialRefillableSolution.VolumeOfNonEvaporable > FixedPoint2.Zero)
-                solutionContainerSystem.AddSolution(refillable, refillableSolution, new Solution(NonEvaporablePrototypeId, testCase.InitialRefillableSolution.VolumeOfNonEvaporable));
+                solutionContainerSystem.AddSolution(refillableSoln.Value, new Solution(NonEvaporablePrototypeId, testCase.InitialRefillableSolution.VolumeOfNonEvaporable));
 
             // Act
-            absorbentSystem.Mop(user, refillable, absorbent, component);
+            absorbentSystem.Mop((absorbent, component), user, refillable);
 
             // Assert
             var absorbentComposition = absorbentSolution.GetReagentPrototypes(prototypeManager).ToDictionary(r => r.Key.ID, r => r.Value);
@@ -138,7 +139,7 @@ public sealed class AbsorbentTest
 
         var entityManager = server.ResolveDependency<IEntityManager>();
         var absorbentSystem = entityManager.System<AbsorbentSystem>();
-        var solutionContainerSystem = entityManager.System<SolutionContainerSystem>();
+        var solutionContainerSystem = entityManager.System<SharedSolutionContainerSystem>();
         var prototypeManager = server.ResolveDependency<IPrototypeManager>();
 
         EntityUid user = default;
@@ -152,21 +153,21 @@ public sealed class AbsorbentTest
             refillable = entityManager.SpawnEntity(SmallRefillableDummyId, coordinates);
 
             entityManager.TryGetComponent(absorbent, out component);
-            solutionContainerSystem.TryGetSolution(absorbent, AbsorbentComponent.SolutionName, out var absorbentSolution);
-            solutionContainerSystem.TryGetRefillableSolution(refillable, out var refillableSolution);
+            solutionContainerSystem.TryGetSolution(absorbent, component.SolutionName, out var absorbentSoln, out var absorbentSolution);
+            solutionContainerSystem.TryGetRefillableSolution(refillable, out var refillableSoln, out var refillableSolution);
 
             // Arrange
-            solutionContainerSystem.AddSolution(absorbent, absorbentSolution, new Solution(EvaporablePrototypeId, testCase.InitialAbsorbentSolution.VolumeOfEvaporable));
+            solutionContainerSystem.AddSolution(absorbentSoln.Value, new Solution(EvaporablePrototypeId, testCase.InitialAbsorbentSolution.VolumeOfEvaporable));
             if (testCase.InitialAbsorbentSolution.VolumeOfNonEvaporable > FixedPoint2.Zero)
-                solutionContainerSystem.AddSolution(absorbent, absorbentSolution, new Solution(NonEvaporablePrototypeId, testCase.InitialAbsorbentSolution.VolumeOfNonEvaporable));
+                solutionContainerSystem.AddSolution(absorbentSoln.Value, new Solution(NonEvaporablePrototypeId, testCase.InitialAbsorbentSolution.VolumeOfNonEvaporable));
 
             if (testCase.InitialRefillableSolution.VolumeOfEvaporable > FixedPoint2.Zero)
-                solutionContainerSystem.AddSolution(refillable, refillableSolution, new Solution(EvaporablePrototypeId, testCase.InitialRefillableSolution.VolumeOfEvaporable));
+                solutionContainerSystem.AddSolution(refillableSoln.Value, new Solution(EvaporablePrototypeId, testCase.InitialRefillableSolution.VolumeOfEvaporable));
             if (testCase.InitialRefillableSolution.VolumeOfNonEvaporable > FixedPoint2.Zero)
-                solutionContainerSystem.AddSolution(refillable, refillableSolution, new Solution(NonEvaporablePrototypeId, testCase.InitialRefillableSolution.VolumeOfNonEvaporable));
+                solutionContainerSystem.AddSolution(refillableSoln.Value, new Solution(NonEvaporablePrototypeId, testCase.InitialRefillableSolution.VolumeOfNonEvaporable));
 
             // Act
-            absorbentSystem.Mop(user, refillable, absorbent, component);
+            absorbentSystem.Mop((absorbent, component), user, refillable);
 
             // Assert
             var absorbentComposition = absorbentSolution.GetReagentPrototypes(prototypeManager).ToDictionary(r => r.Key.ID, r => r.Value);

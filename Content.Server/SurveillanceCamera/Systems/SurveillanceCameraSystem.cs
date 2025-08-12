@@ -1,15 +1,17 @@
-using Content.Server.DeviceNetwork;
-using Content.Server.DeviceNetwork.Components;
+using Content.Server.Administration.Logs;
 using Content.Server.DeviceNetwork.Systems;
 using Content.Server.Emp;
-using Content.Server.Power.Components;
 using Content.Shared.ActionBlocker;
+using Content.Shared.Database;
 using Content.Shared.DeviceNetwork;
+using Content.Shared.DeviceNetwork.Events;
+using Content.Shared.Power;
 using Content.Shared.SurveillanceCamera;
 using Content.Shared.Verbs;
 using Robust.Server.GameObjects;
 using Robust.Shared.Player;
 using Robust.Shared.Prototypes;
+using Content.Shared.DeviceNetwork.Components;
 
 namespace Content.Server.SurveillanceCamera;
 
@@ -21,6 +23,8 @@ public sealed class SurveillanceCameraSystem : EntitySystem
     [Dependency] private readonly DeviceNetworkSystem _deviceNetworkSystem = default!;
     [Dependency] private readonly UserInterfaceSystem _userInterface = default!;
     [Dependency] private readonly SharedAppearanceSystem _appearance = default!;
+    [Dependency] private readonly IAdminLogManager _adminLogger = default!;
+
 
     // Pings a surveillance camera subnet. All cameras will always respond
     // with a data message if they are on the same subnet.
@@ -129,7 +133,7 @@ public sealed class SurveillanceCameraSystem : EntitySystem
 
     private void AddVerbs(EntityUid uid, SurveillanceCameraComponent component, GetVerbsEvent<AlternativeVerb> verbs)
     {
-        if (!_actionBlocker.CanInteract(verbs.User, uid))
+        if (!_actionBlocker.CanInteract(verbs.User, uid) || !_actionBlocker.CanComplexInteract(verbs.User))
         {
             return;
         }
@@ -170,6 +174,7 @@ public sealed class SurveillanceCameraSystem : EntitySystem
         component.CameraId = args.Name;
         component.NameSet = true;
         UpdateSetupInterface(uid, component);
+        _adminLogger.Add(LogType.Chat, LogImpact.Low, $"{ToPrettyString(args.Actor)} set the name of {ToPrettyString(uid)} to \"{args.Name}.\"");
     }
 
     private void OnSetNetwork(EntityUid uid, SurveillanceCameraComponent component,
@@ -196,14 +201,14 @@ public sealed class SurveillanceCameraSystem : EntitySystem
         UpdateSetupInterface(uid, component);
     }
 
-    private void OpenSetupInterface(EntityUid uid, EntityUid player, SurveillanceCameraComponent? camera = null, ActorComponent? actor = null)
+    private void OpenSetupInterface(EntityUid uid, EntityUid player, SurveillanceCameraComponent? camera = null)
     {
-        if (!Resolve(uid, ref camera) || !Resolve(player, ref actor))
-            return;
-        if (!_userInterface.TryGetUi(uid, SurveillanceCameraSetupUiKey.Camera, out var bui))
+        if (!Resolve(uid, ref camera))
             return;
 
-        _userInterface.OpenUi(bui, actor.PlayerSession);
+        if (!_userInterface.TryOpenUi(uid, SurveillanceCameraSetupUiKey.Camera, player))
+            return;
+
         UpdateSetupInterface(uid, camera);
     }
 
@@ -216,7 +221,7 @@ public sealed class SurveillanceCameraSystem : EntitySystem
 
         if (camera.NameSet && camera.NetworkSet)
         {
-            _userInterface.TryCloseAll(uid, SurveillanceCameraSetupUiKey.Camera);
+            _userInterface.CloseUi(uid, SurveillanceCameraSetupUiKey.Camera);
             return;
         }
 
@@ -228,14 +233,14 @@ public sealed class SurveillanceCameraSystem : EntitySystem
             }
             else if (!camera.NetworkSet)
             {
-                _userInterface.TryCloseAll(uid, SurveillanceCameraSetupUiKey.Camera);
+                _userInterface.CloseUi(uid, SurveillanceCameraSetupUiKey.Camera);
                 return;
             }
         }
 
         var state = new SurveillanceCameraSetupBoundUiState(camera.CameraId, deviceNet.ReceiveFrequency ?? 0,
             camera.AvailableNetworks, camera.NameSet, camera.NetworkSet);
-        _userInterface.TrySetUiState(uid, SurveillanceCameraSetupUiKey.Camera, state);
+        _userInterface.SetUiState(uid, SurveillanceCameraSetupUiKey.Camera, state);
     }
 
     // If the camera deactivates for any reason, it must have all viewers removed,
@@ -320,6 +325,13 @@ public sealed class SurveillanceCameraSystem : EntitySystem
         {
             AddActiveViewer(camera, player, monitor, component);
         }
+
+        // Add monitor without viewers
+        if (players.Count == 0 && monitor != null)
+        {
+            component.ActiveMonitors.Add(monitor.Value);
+            UpdateVisuals(camera, component);
+        }
     }
 
     // Switch the set of active viewers from one camera to another.
@@ -348,13 +360,12 @@ public sealed class SurveillanceCameraSystem : EntitySystem
 
     public void RemoveActiveViewer(EntityUid camera, EntityUid player, EntityUid? monitor = null, SurveillanceCameraComponent? component = null, ActorComponent? actor = null)
     {
-        if (!Resolve(camera, ref component)
-            || !Resolve(player, ref actor))
-        {
+        if (!Resolve(camera, ref component))
             return;
-        }
 
-        _viewSubscriberSystem.RemoveViewSubscriber(camera, actor.PlayerSession);
+        if (Resolve(player, ref actor))
+            _viewSubscriberSystem.RemoveViewSubscriber(camera, actor.PlayerSession);
+
         component.ActiveViewers.Remove(player);
 
         if (monitor != null)
@@ -375,6 +386,13 @@ public sealed class SurveillanceCameraSystem : EntitySystem
         foreach (var player in players)
         {
             RemoveActiveViewer(camera, player, monitor, component);
+        }
+
+        // Even if not removing any viewers, remove the monitor
+        if (players.Count == 0 && monitor != null)
+        {
+            component.ActiveMonitors.Remove(monitor.Value);
+            UpdateVisuals(camera, component);
         }
     }
 

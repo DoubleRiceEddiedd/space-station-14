@@ -1,88 +1,121 @@
 using System.Linq;
 using Content.Server.DoAfter;
 using Content.Server.Humanoid;
-using Content.Server.UserInterface;
 using Content.Shared.DoAfter;
 using Content.Shared.Humanoid;
 using Content.Shared.Humanoid.Markings;
+using Content.Shared.IdentityManagement;
 using Content.Shared.Interaction;
+using Content.Shared.Inventory;
 using Content.Shared.MagicMirror;
-using Robust.Server.GameObjects;
+using Content.Shared.Popups;
+using Content.Shared.Tag;
 using Robust.Shared.Audio.Systems;
-using Robust.Shared.Player;
+using Robust.Shared.Prototypes;
 
 namespace Content.Server.MagicMirror;
 
-public sealed class MagicMirrorSystem : EntitySystem
+/// <summary>
+/// Allows humanoids to change their appearance mid-round.
+/// </summary>
+public sealed class MagicMirrorSystem : SharedMagicMirrorSystem
 {
     [Dependency] private readonly SharedAudioSystem _audio = default!;
     [Dependency] private readonly DoAfterSystem _doAfterSystem = default!;
     [Dependency] private readonly MarkingManager _markings = default!;
     [Dependency] private readonly HumanoidAppearanceSystem _humanoid = default!;
-    [Dependency] private readonly UserInterfaceSystem _uiSystem = default!;
+    [Dependency] private readonly SharedPopupSystem _popup = default!;
+    [Dependency] private readonly InventorySystem _inventory = default!;
+    [Dependency] private readonly TagSystem _tagSystem = default!;
 
+    private static readonly ProtoId<TagPrototype> HidesHairTag = "HidesHair";
 
     public override void Initialize()
     {
         base.Initialize();
-        SubscribeLocalEvent<MagicMirrorComponent, ActivatableUIOpenAttemptEvent>(OnOpenUIAttempt);
-        SubscribeLocalEvent<MagicMirrorComponent, AfterActivatableUIOpenEvent>(AfterUIOpen);
-        SubscribeLocalEvent<MagicMirrorComponent, MagicMirrorSelectMessage>(OnMagicMirrorSelect);
-        SubscribeLocalEvent<MagicMirrorComponent, MagicMirrorChangeColorMessage>(OnTryMagicMirrorChangeColor);
-        SubscribeLocalEvent<MagicMirrorComponent, MagicMirrorAddSlotMessage>(OnTryMagicMirrorAddSlot);
-        SubscribeLocalEvent<MagicMirrorComponent, MagicMirrorRemoveSlotMessage>(OnTryMagicMirrorRemoveSlot);
 
-        SubscribeLocalEvent<MagicMirrorComponent, AfterInteractEvent>(OnMagicMirrorInteract);
-
-        SubscribeLocalEvent<MagicMirrorComponent, SelectDoAfterEvent>(OnSelectSlotDoAfter);
-        SubscribeLocalEvent<MagicMirrorComponent, ChangeColorDoAfterEvent>(OnChangeColorDoAfter);
-        SubscribeLocalEvent<MagicMirrorComponent, RemoveSlotDoAfterEvent>(OnRemoveSlotDoAfter);
-        SubscribeLocalEvent<MagicMirrorComponent, AddSlotDoAfterEvent>(OnAddSlotDoAfter);
-    }
-
-    private void OnMagicMirrorInteract(Entity<MagicMirrorComponent> mirror, ref AfterInteractEvent args)
-    {
-        if (!TryComp<ActorComponent>(args.User, out var actor)) return;
-        if (TryComp<HumanoidAppearanceComponent>(args.Target, out var humanoid))
+        Subs.BuiEvents<MagicMirrorComponent>(MagicMirrorUiKey.Key,
+            subs =>
         {
-            mirror.Comp.Target = new Entity<HumanoidAppearanceComponent>(args.Target.Value, humanoid);
-            UpdateInterface(mirror.Owner, mirror.Comp.Target.Value.Owner, actor.PlayerSession);
-            Log.Debug($"Target {mirror.Comp.Target}!");
-        };
-    }
+            subs.Event<BoundUIClosedEvent>(OnUiClosed);
+            subs.Event<MagicMirrorSelectMessage>(OnMagicMirrorSelect);
+            subs.Event<MagicMirrorChangeColorMessage>(OnTryMagicMirrorChangeColor);
+            subs.Event<MagicMirrorAddSlotMessage>(OnTryMagicMirrorAddSlot);
+            subs.Event<MagicMirrorRemoveSlotMessage>(OnTryMagicMirrorRemoveSlot);
+        });
 
-    private void OnOpenUIAttempt(EntityUid uid, MagicMirrorComponent mirror, ActivatableUIOpenAttemptEvent args)
-    {
-        if (!HasComp<HumanoidAppearanceComponent>(args.User))
-            args.Cancel();
+
+        SubscribeLocalEvent<MagicMirrorComponent, MagicMirrorSelectDoAfterEvent>(OnSelectSlotDoAfter);
+        SubscribeLocalEvent<MagicMirrorComponent, MagicMirrorChangeColorDoAfterEvent>(OnChangeColorDoAfter);
+        SubscribeLocalEvent<MagicMirrorComponent, MagicMirrorRemoveSlotDoAfterEvent>(OnRemoveSlotDoAfter);
+        SubscribeLocalEvent<MagicMirrorComponent, MagicMirrorAddSlotDoAfterEvent>(OnAddSlotDoAfter);
     }
 
     private void OnMagicMirrorSelect(EntityUid uid, MagicMirrorComponent component, MagicMirrorSelectMessage message)
     {
-        if (component.Target == null) return;
-        if (message.Session.AttachedEntity == null) return;
+        if (component.Target is not { } target)
+            return;
 
-        var doAfter = new SelectDoAfterEvent(message);
-        _doAfterSystem.TryStartDoAfter(new DoAfterArgs(EntityManager, message.Session.AttachedEntity.Value, component.SelectSlotTime, doAfter, uid, target: component.Target.Value.Owner, used: uid)
+        // Check if the target getting their hair altered has any clothes that hides their hair
+        if (CheckHeadSlotOrClothes(message.Actor, component.Target.Value))
         {
-            BreakOnTargetMove = true,
-            BreakOnDamage = true,
-            BreakOnHandChange = false,
-            BreakOnUserMove = true,
-            BreakOnWeightlessMove = false,
-            NeedHand = true
-        });
+            _popup.PopupEntity(
+                component.Target == message.Actor
+                    ? Loc.GetString("magic-mirror-blocked-by-hat-self")
+                    : Loc.GetString("magic-mirror-blocked-by-hat-self-target", ("target", Identity.Entity(message.Actor, EntityManager))),
+                message.Actor,
+                message.Actor,
+                PopupType.Medium);
+            return;
+        }
 
+        _doAfterSystem.Cancel(component.DoAfter);
+        component.DoAfter = null;
+
+        var doafterTime = component.SelectSlotTime;
+        if (component.Target == message.Actor)
+            doafterTime /= 3;
+
+        var doAfter = new MagicMirrorSelectDoAfterEvent()
+        {
+            Category = message.Category,
+            Slot = message.Slot,
+            Marking = message.Marking,
+        };
+
+        _doAfterSystem.TryStartDoAfter(new DoAfterArgs(EntityManager, message.Actor, doafterTime, doAfter, uid, target: target, used: uid)
+        {
+            DistanceThreshold = SharedInteractionSystem.InteractionRange,
+            BreakOnDamage = true,
+            BreakOnMove = true,
+            NeedHand = true,
+        },
+            out var doAfterId);
+
+        if (component.Target == message.Actor)
+        {
+            _popup.PopupEntity(Loc.GetString("magic-mirror-change-slot-self"), component.Target.Value, component.Target.Value, PopupType.Medium);
+        }
+        else
+        {
+            _popup.PopupEntity(Loc.GetString("magic-mirror-change-slot-target", ("user", Identity.Entity(message.Actor, EntityManager))), component.Target.Value, component.Target.Value, PopupType.Medium);
+        }
+
+        component.DoAfter = doAfterId;
         _audio.PlayPvs(component.ChangeHairSound, uid);
     }
-    private void OnSelectSlotDoAfter(EntityUid uid, MagicMirrorComponent component, SelectDoAfterEvent args)
-    {
-        if (args.Handled || args.Args.Target == null || args.Cancelled)
-            return;
-        if (component.Target == null) return;
 
-        var category = MarkingCategories.Hair;
-        switch (args.Message.Category)
+    private void OnSelectSlotDoAfter(EntityUid uid, MagicMirrorComponent component, MagicMirrorSelectDoAfterEvent args)
+    {
+        if (args.Handled || args.Target == null || args.Cancelled)
+            return;
+
+        if (component.Target != args.Target)
+            return;
+
+        MarkingCategories category;
+
+        switch (args.Category)
         {
             case MagicMirrorCategory.Hair:
                 category = MarkingCategories.Hair;
@@ -94,35 +127,72 @@ public sealed class MagicMirrorSystem : EntitySystem
                 return;
         }
 
-        _humanoid.SetMarkingId(component.Target.Value.Owner, category, args.Message.Slot, args.Message.Marking);
+        _humanoid.SetMarkingId(component.Target.Value, category, args.Slot, args.Marking);
 
-        UpdateInterface(uid, component.Target.Value.Owner, args.Message.Session);
+        UpdateInterface(uid, component.Target.Value, component);
     }
 
     private void OnTryMagicMirrorChangeColor(EntityUid uid, MagicMirrorComponent component, MagicMirrorChangeColorMessage message)
     {
-        if (component.Target == null) return;
-        if (message.Session.AttachedEntity == null) return;
-
-        var doAfter = new ChangeColorDoAfterEvent(message);
-        _doAfterSystem.TryStartDoAfter(new DoAfterArgs(EntityManager, message.Session.AttachedEntity.Value, component.ChangeSlotTime, doAfter, uid, target: component.Target.Value.Owner, used: uid)
-        {
-            BreakOnTargetMove = true,
-            BreakOnDamage = true,
-            BreakOnHandChange = false,
-            BreakOnUserMove = true,
-            BreakOnWeightlessMove = false,
-            NeedHand = true
-        });
-    }
-    private void OnChangeColorDoAfter(EntityUid uid, MagicMirrorComponent component, ChangeColorDoAfterEvent args)
-    {
-        if (args.Handled || args.Args.Target == null || args.Cancelled)
+        if (component.Target is not { } target)
             return;
-        if (component.Target == null) return;
 
-        var category = MarkingCategories.Hair;
-        switch (args.Message.Category)
+        // Check if the target getting their hair altered has any clothes that hides their hair
+        if (CheckHeadSlotOrClothes(message.Actor, component.Target.Value))
+        {
+            _popup.PopupEntity(
+                component.Target == message.Actor
+                    ? Loc.GetString("magic-mirror-blocked-by-hat-self")
+                    : Loc.GetString("magic-mirror-blocked-by-hat-self-target", ("target", Identity.Entity(message.Actor, EntityManager))),
+                message.Actor,
+                message.Actor,
+                PopupType.Medium);
+            return;
+        }
+
+        _doAfterSystem.Cancel(component.DoAfter);
+        component.DoAfter = null;
+
+        var doafterTime = component.ChangeSlotTime;
+        if (component.Target == message.Actor)
+            doafterTime /= 3;
+
+        var doAfter = new MagicMirrorChangeColorDoAfterEvent()
+        {
+            Category = message.Category,
+            Slot = message.Slot,
+            Colors = message.Colors,
+        };
+
+        _doAfterSystem.TryStartDoAfter(new DoAfterArgs(EntityManager, message.Actor, doafterTime, doAfter, uid, target: target, used: uid)
+        {
+            BreakOnDamage = true,
+            BreakOnMove = true,
+            NeedHand = true
+        },
+            out var doAfterId);
+
+        if (component.Target == message.Actor)
+        {
+            _popup.PopupEntity(Loc.GetString("magic-mirror-change-color-self"), component.Target.Value, component.Target.Value, PopupType.Medium);
+        }
+        else
+        {
+            _popup.PopupEntity(Loc.GetString("magic-mirror-change-color-target", ("user", Identity.Entity(message.Actor, EntityManager))), component.Target.Value, component.Target.Value, PopupType.Medium);
+        }
+
+        component.DoAfter = doAfterId;
+    }
+    private void OnChangeColorDoAfter(EntityUid uid, MagicMirrorComponent component, MagicMirrorChangeColorDoAfterEvent args)
+    {
+        if (args.Handled || args.Target == null || args.Cancelled)
+            return;
+
+        if (component.Target != args.Target)
+            return;
+
+        MarkingCategories category;
+        switch (args.Category)
         {
             case MagicMirrorCategory.Hair:
                 category = MarkingCategories.Hair;
@@ -134,39 +204,76 @@ public sealed class MagicMirrorSystem : EntitySystem
                 return;
         }
 
-        _humanoid.SetMarkingColor(component.Target.Value.Owner, category, args.Message.Slot, args.Message.Colors);
+        _humanoid.SetMarkingColor(component.Target.Value, category, args.Slot, args.Colors);
 
         // using this makes the UI feel like total ass
+        // que
         // UpdateInterface(uid, component.Target, message.Session);
     }
 
     private void OnTryMagicMirrorRemoveSlot(EntityUid uid, MagicMirrorComponent component, MagicMirrorRemoveSlotMessage message)
     {
-        if (component.Target == null) return;
-        if (message.Session.AttachedEntity == null) return;
-
-        var doAfter = new RemoveSlotDoAfterEvent(message);
-        _doAfterSystem.TryStartDoAfter(new DoAfterArgs(EntityManager, message.Session.AttachedEntity.Value, component.RemoveSlotTime, doAfter, uid, target: component.Target.Value.Owner, used: uid)
-        {
-            BreakOnTargetMove = true,
-            BreakOnDamage = true,
-            BreakOnHandChange = false,
-            BreakOnUserMove = true,
-            BreakOnWeightlessMove = false,
-            NeedHand = true
-        });
-
-        _audio.PlayPvs(component.ChangeHairSound, uid);
-    }
-    private void OnRemoveSlotDoAfter(EntityUid uid, MagicMirrorComponent component, RemoveSlotDoAfterEvent args)
-    {
-        if (args.Handled || args.Args.Target == null || args.Cancelled)
+        if (component.Target is not { } target)
             return;
 
-        if (component.Target == null) return;
+        // Check if the target getting their hair altered has any clothes that hides their hair
+        if (CheckHeadSlotOrClothes(message.Actor, component.Target.Value))
+        {
+            _popup.PopupEntity(
+                component.Target == message.Actor
+                    ? Loc.GetString("magic-mirror-blocked-by-hat-self")
+                    : Loc.GetString("magic-mirror-blocked-by-hat-self-target", ("target", Identity.Entity(message.Actor, EntityManager))),
+                message.Actor,
+                message.Actor,
+                PopupType.Medium);
+            return;
+        }
 
-        var category = MarkingCategories.Hair;
-        switch (args.Message.Category)
+        _doAfterSystem.Cancel(component.DoAfter);
+        component.DoAfter = null;
+
+        var doafterTime = component.RemoveSlotTime;
+        if (component.Target == message.Actor)
+            doafterTime /= 3;
+
+        var doAfter = new MagicMirrorRemoveSlotDoAfterEvent()
+        {
+            Category = message.Category,
+            Slot = message.Slot,
+        };
+
+        _doAfterSystem.TryStartDoAfter(new DoAfterArgs(EntityManager, message.Actor, doafterTime, doAfter, uid, target: target, used: uid)
+        {
+            DistanceThreshold = SharedInteractionSystem.InteractionRange,
+            BreakOnDamage = true,
+            NeedHand = true
+        },
+            out var doAfterId);
+
+        if (component.Target == message.Actor)
+        {
+            _popup.PopupEntity(Loc.GetString("magic-mirror-remove-slot-self"), component.Target.Value, component.Target.Value, PopupType.Medium);
+        }
+        else
+        {
+            _popup.PopupEntity(Loc.GetString("magic-mirror-remove-slot-target", ("user", Identity.Entity(message.Actor, EntityManager))), component.Target.Value, component.Target.Value, PopupType.Medium);
+        }
+
+        component.DoAfter = doAfterId;
+        _audio.PlayPvs(component.ChangeHairSound, uid);
+    }
+
+    private void OnRemoveSlotDoAfter(EntityUid uid, MagicMirrorComponent component, MagicMirrorRemoveSlotDoAfterEvent args)
+    {
+        if (args.Handled || args.Target == null || args.Cancelled)
+            return;
+
+        if (component.Target != args.Target)
+            return;
+
+        MarkingCategories category;
+
+        switch (args.Category)
         {
             case MagicMirrorCategory.Hair:
                 category = MarkingCategories.Hair;
@@ -178,37 +285,69 @@ public sealed class MagicMirrorSystem : EntitySystem
                 return;
         }
 
-        _humanoid.RemoveMarking(component.Target.Value.Owner, category, args.Message.Slot);
+        _humanoid.RemoveMarking(component.Target.Value, category, args.Slot);
 
-        UpdateInterface(uid, component.Target.Value.Owner, args.Message.Session);
+        UpdateInterface(uid, component.Target.Value, component);
     }
 
     private void OnTryMagicMirrorAddSlot(EntityUid uid, MagicMirrorComponent component, MagicMirrorAddSlotMessage message)
     {
-        if (component.Target == null) return;
-        if (message.Session.AttachedEntity == null) return;
-
-        var doAfter = new AddSlotDoAfterEvent(message);
-        _doAfterSystem.TryStartDoAfter(new DoAfterArgs(EntityManager, message.Session.AttachedEntity.Value, component.AddSlotTime, doAfter, uid, target: component.Target.Value.Owner, used: uid)
-        {
-            BreakOnTargetMove = true,
-            BreakOnDamage = true,
-            BreakOnHandChange = false,
-            BreakOnUserMove = true,
-            BreakOnWeightlessMove = false,
-            NeedHand = true
-        });
-        _audio.PlayPvs(component.ChangeHairSound, uid);
-    }
-    private void OnAddSlotDoAfter(EntityUid uid, MagicMirrorComponent component, AddSlotDoAfterEvent args)
-    {
-        if (args.Handled || args.Args.Target == null || args.Cancelled)
+        if (component.Target == null)
             return;
 
-        if (component.Target == null) return;
+        // Check if the target getting their hair altered has any clothes that hides their hair
+        if (CheckHeadSlotOrClothes(message.Actor, component.Target.Value))
+        {
+            _popup.PopupEntity(
+                component.Target == message.Actor
+                    ? Loc.GetString("magic-mirror-blocked-by-hat-self")
+                    : Loc.GetString("magic-mirror-blocked-by-hat-self-target", ("target", Identity.Entity(message.Actor, EntityManager))),
+                message.Actor,
+                message.Actor,
+                PopupType.Medium);
+            return;
+        }
 
-        var category = MarkingCategories.Hair;
-        switch (args.Message.Category)
+        _doAfterSystem.Cancel(component.DoAfter);
+        component.DoAfter = null;
+
+        var doafterTime = component.AddSlotTime;
+        if (component.Target == message.Actor)
+            doafterTime /= 3;
+
+        var doAfter = new MagicMirrorAddSlotDoAfterEvent()
+        {
+            Category = message.Category,
+        };
+
+        _doAfterSystem.TryStartDoAfter(new DoAfterArgs(EntityManager, message.Actor, doafterTime, doAfter, uid, target: component.Target.Value, used: uid)
+        {
+            BreakOnDamage = true,
+            BreakOnMove = true,
+            NeedHand = true,
+        },
+            out var doAfterId);
+
+        if (component.Target == message.Actor)
+        {
+            _popup.PopupEntity(Loc.GetString("magic-mirror-add-slot-self"), component.Target.Value, component.Target.Value, PopupType.Medium);
+        }
+        else
+        {
+            _popup.PopupEntity(Loc.GetString("magic-mirror-add-slot-target", ("user", Identity.Entity(message.Actor, EntityManager))), component.Target.Value, component.Target.Value, PopupType.Medium);
+        }
+
+        component.DoAfter = doAfterId;
+        _audio.PlayPvs(component.ChangeHairSound, uid);
+    }
+    private void OnAddSlotDoAfter(EntityUid uid, MagicMirrorComponent component, MagicMirrorAddSlotDoAfterEvent args)
+    {
+        if (args.Handled || args.Target == null || args.Cancelled || !TryComp(component.Target, out HumanoidAppearanceComponent? humanoid))
+            return;
+
+        MarkingCategories category;
+
+        switch (args.Category)
         {
             case MagicMirrorCategory.Hair:
                 category = MarkingCategories.Hair;
@@ -220,45 +359,48 @@ public sealed class MagicMirrorSystem : EntitySystem
                 return;
         }
 
-        var marking = _markings.MarkingsByCategoryAndSpecies(category, component.Target.Value.Comp.Species).Keys.FirstOrDefault();
+        var marking = _markings.MarkingsByCategoryAndSpecies(category, humanoid.Species).Keys.FirstOrDefault();
+
         if (string.IsNullOrEmpty(marking))
-        {
             return;
+
+        _humanoid.AddMarking(component.Target.Value, marking, Color.Black);
+
+        UpdateInterface(uid, component.Target.Value, component);
+
+    }
+
+    private void OnUiClosed(Entity<MagicMirrorComponent> ent, ref BoundUIClosedEvent args)
+    {
+        ent.Comp.Target = null;
+        Dirty(ent);
+    }
+
+    /// <summary>
+    /// Helper function that checks if the wearer has anything on their head
+    /// Or if they have any clothes that hides their hair
+    /// </summary>
+    private bool CheckHeadSlotOrClothes(EntityUid user, EntityUid target)
+    {
+        if (TryComp<InventoryComponent>(target, out var inventoryComp))
+        {
+            // any hat whatsoever will block haircutting
+            if (_inventory.TryGetSlotEntity(target, "head", out var hat, inventoryComp))
+            {
+                return true;
+            }
+
+            // maybe there's some kind of armor that has the HidesHair tag as well, so check every slot for it
+            var slots = _inventory.GetSlotEnumerator((target, inventoryComp), SlotFlags.WITHOUT_POCKET);
+            while (slots.MoveNext(out var slot))
+            {
+                if (slot.ContainedEntity != null && _tagSystem.HasTag(slot.ContainedEntity.Value, HidesHairTag))
+                {
+                    return true;
+                }
+            }
         }
 
-        _humanoid.AddMarking(component.Target.Value.Owner, marking, Color.Black);
-
-        UpdateInterface(uid, component.Target.Value.Owner, args.Message.Session);
-    }
-
-    private void UpdateInterface(EntityUid uid, EntityUid playerUid, ICommonSession session)
-    {
-        if (!TryComp<HumanoidAppearanceComponent>(playerUid, out var humanoid)) return;
-        if (session is not { } player) return;
-
-        var hair = humanoid.MarkingSet.TryGetCategory(MarkingCategories.Hair, out var hairMarkings)
-            ? new List<Marking>(hairMarkings)
-            : new();
-
-        var facialHair = humanoid.MarkingSet.TryGetCategory(MarkingCategories.FacialHair, out var facialHairMarkings)
-            ? new List<Marking>(facialHairMarkings)
-            : new();
-
-        var msg = new MagicMirrorUiData(
-            humanoid.Species,
-            hair,
-            humanoid.MarkingSet.PointsLeft(MarkingCategories.Hair) + hair.Count,
-            facialHair,
-            humanoid.MarkingSet.PointsLeft(MarkingCategories.FacialHair) + facialHair.Count);
-
-        _uiSystem.TrySendUiMessage(uid, MagicMirrorUiKey.Key, msg, player);
-    }
-
-    private void AfterUIOpen(EntityUid uid, MagicMirrorComponent component, AfterActivatableUIOpenEvent args)
-    {
-        if (!TryComp<HumanoidAppearanceComponent>(args.User, out var humanoid)) return;
-        component.Target = new Entity<HumanoidAppearanceComponent>(args.User, humanoid);
-
-        UpdateInterface(uid, args.User, args.Session);
+        return false;
     }
 }

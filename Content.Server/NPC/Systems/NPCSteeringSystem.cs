@@ -3,7 +3,6 @@ using System.Threading;
 using System.Threading.Tasks;
 using Content.Server.Administration.Managers;
 using Content.Server.DoAfter;
-using Content.Server.Doors.Systems;
 using Content.Server.NPC.Components;
 using Content.Server.NPC.Events;
 using Content.Server.NPC.Pathfinding;
@@ -12,8 +11,11 @@ using Content.Shared.Climbing.Systems;
 using Content.Shared.CombatMode;
 using Content.Shared.Interaction;
 using Content.Shared.Movement.Components;
+using Content.Shared.Movement.Events;
 using Content.Shared.Movement.Systems;
 using Content.Shared.NPC;
+using Content.Shared.NPC.Components;
+using Content.Shared.NPC.Systems;
 using Content.Shared.NPC.Events;
 using Content.Shared.Physics;
 using Content.Shared.Weapons.Melee;
@@ -28,12 +30,16 @@ using Robust.Shared.Timing;
 using Robust.Shared.Utility;
 using Content.Shared.Prying.Systems;
 using Microsoft.Extensions.ObjectPool;
-using Robust.Shared.Threading;
+using Prometheus;
 
 namespace Content.Server.NPC.Systems;
 
 public sealed partial class NPCSteeringSystem : SharedNPCSteeringSystem
 {
+    private static readonly Gauge ActiveSteeringGauge = Metrics.CreateGauge(
+        "npc_steering_active_count",
+        "Amount of NPCs trying to actively do steering");
+
     /*
      * We use context steering to determine which way to move.
      * This involves creating an array of possible directions and assigning a value for the desireability of each direction.
@@ -47,7 +53,6 @@ public sealed partial class NPCSteeringSystem : SharedNPCSteeringSystem
     [Dependency] private readonly IAdminManager _admin = default!;
     [Dependency] private readonly IConfigurationManager _configManager = default!;
     [Dependency] private readonly IGameTiming _timing = default!;
-    [Dependency] private readonly IMapManager _mapManager = default!;
     [Dependency] private readonly IRobustRandom _random = default!;
     [Dependency] private readonly ClimbSystem _climb = default!;
     [Dependency] private readonly DoAfterSystem _doAfter = default!;
@@ -55,6 +60,7 @@ public sealed partial class NPCSteeringSystem : SharedNPCSteeringSystem
     [Dependency] private readonly NpcFactionSystem _npcFaction = default!;
     [Dependency] private readonly PathfindingSystem _pathfindingSystem = default!;
     [Dependency] private readonly PryingSystem _pryingSystem = default!;
+    [Dependency] private readonly SharedMapSystem _mapSystem = default!;
     [Dependency] private readonly SharedInteractionSystem _interaction = default!;
     [Dependency] private readonly SharedMeleeWeaponSystem _melee = default!;
     [Dependency] private readonly SharedMoverController _mover = default!;
@@ -86,6 +92,8 @@ public sealed partial class NPCSteeringSystem : SharedNPCSteeringSystem
 
     private object _obstacles = new();
 
+    private int _activeSteeringCount;
+
     public override void Initialize()
     {
         base.Initialize();
@@ -103,11 +111,10 @@ public sealed partial class NPCSteeringSystem : SharedNPCSteeringSystem
         }
 
         UpdatesBefore.Add(typeof(SharedPhysicsSystem));
-        _configManager.OnValueChanged(CCVars.NPCEnabled, SetNPCEnabled, true);
-        _configManager.OnValueChanged(CCVars.NPCPathfinding, SetNPCPathfinding, true);
+        Subs.CVar(_configManager, CCVars.NPCEnabled, SetNPCEnabled, true);
+        Subs.CVar(_configManager, CCVars.NPCPathfinding, SetNPCPathfinding, true);
 
         SubscribeLocalEvent<NPCSteeringComponent, ComponentShutdown>(OnSteeringShutdown);
-        SubscribeLocalEvent<NPCSteeringComponent, EntityUnpausedEvent>(OnSteeringUnpaused);
         SubscribeNetworkEvent<RequestNPCSteeringDebugEvent>(OnDebugRequest);
     }
 
@@ -140,13 +147,6 @@ public sealed partial class NPCSteeringSystem : SharedNPCSteeringSystem
         }
     }
 
-    public override void Shutdown()
-    {
-        base.Shutdown();
-        _configManager.UnsubValueChanged(CCVars.NPCEnabled, SetNPCEnabled);
-        _configManager.UnsubValueChanged(CCVars.NPCPathfinding, SetNPCPathfinding);
-    }
-
     private void OnDebugRequest(RequestNPCSteeringDebugEvent msg, EntitySessionEventArgs args)
     {
         if (!_admin.IsAdmin(args.SenderSession))
@@ -163,12 +163,6 @@ public sealed partial class NPCSteeringSystem : SharedNPCSteeringSystem
         // Cancel any active pathfinding jobs as they're irrelevant.
         component.PathfindToken?.Cancel();
         component.PathfindToken = null;
-    }
-
-    private void OnSteeringUnpaused(EntityUid uid, NPCSteeringComponent component, ref EntityUnpausedEvent args)
-    {
-        component.LastStuckTime += args.PausedTime;
-        component.NextSteer += args.PausedTime;
     }
 
     /// <summary>
@@ -218,9 +212,12 @@ public sealed partial class NPCSteeringSystem : SharedNPCSteeringSystem
         if (!Resolve(uid, ref component, false))
             return;
 
-        if (EntityManager.TryGetComponent(uid, out InputMoverComponent? controller))
+        if (TryComp(uid, out InputMoverComponent? controller))
         {
             controller.CurTickSprintMovement = Vector2.Zero;
+
+            var ev = new SpriteMoveEvent(false);
+            RaiseLocalEvent(uid, ref ev);
         }
 
         component.PathfindToken?.Cancel();
@@ -254,12 +251,15 @@ public sealed partial class NPCSteeringSystem : SharedNPCSteeringSystem
         };
         var curTime = _timing.CurTime;
 
+        _activeSteeringCount = 0;
+
         Parallel.For(0, index, options, i =>
         {
             var (uid, steering, mover, xform) = npcs[i];
             Steer(uid, steering, mover, xform, frameTime, curTime);
         });
 
+        ActiveSteeringGauge.Set(_activeSteeringCount);
 
         if (_subscribedSessions.Count > 0)
         {
@@ -284,16 +284,21 @@ public sealed partial class NPCSteeringSystem : SharedNPCSteeringSystem
         }
     }
 
-    private void SetDirection(InputMoverComponent component, NPCSteeringComponent steering, Vector2 value, bool clear = true)
+    private void SetDirection(EntityUid uid, InputMoverComponent component, NPCSteeringComponent steering, Vector2 value, bool clear = true)
     {
         if (clear && value.Equals(Vector2.Zero))
         {
             steering.CurrentPath.Clear();
+            Array.Clear(steering.Interest);
+            Array.Clear(steering.Danger);
         }
 
         component.CurTickSprintMovement = value;
         component.LastInputTick = _timing.CurTick;
         component.LastInputSubTick = ushort.MaxValue;
+
+        var ev = new SpriteMoveEvent(true);
+        RaiseLocalEvent(uid, ref ev);
     }
 
     /// <summary>
@@ -309,7 +314,7 @@ public sealed partial class NPCSteeringSystem : SharedNPCSteeringSystem
     {
         if (Deleted(steering.Coordinates.EntityId))
         {
-            SetDirection(mover, steering, Vector2.Zero);
+            SetDirection(uid, mover, steering, Vector2.Zero);
             steering.Status = SteeringStatus.NoPath;
             return;
         }
@@ -317,20 +322,20 @@ public sealed partial class NPCSteeringSystem : SharedNPCSteeringSystem
         // No path set from pathfinding or the likes.
         if (steering.Status == SteeringStatus.NoPath)
         {
-            SetDirection(mover, steering, Vector2.Zero);
+            SetDirection(uid, mover, steering, Vector2.Zero);
             return;
         }
 
         // Can't move at all, just noop input.
         if (!mover.CanMove)
         {
-            SetDirection(mover, steering, Vector2.Zero);
+            SetDirection(uid, mover, steering, Vector2.Zero);
             steering.Status = SteeringStatus.NoPath;
             return;
         }
 
-        var interest = steering.Interest;
-        var danger = steering.Danger;
+        Interlocked.Increment(ref _activeSteeringCount);
+
         var agentRadius = steering.Radius;
         var worldPos = _transform.GetWorldPosition(xform);
         var (layer, mask) = _physics.GetHardCollision(uid);
@@ -342,13 +347,10 @@ public sealed partial class NPCSteeringSystem : SharedNPCSteeringSystem
         var body = _physicsQuery.GetComponent(uid);
         var dangerPoints = steering.DangerPoints;
         dangerPoints.Clear();
+        Span<float> interest = stackalloc float[InterestDirections];
+        Span<float> danger = stackalloc float[InterestDirections];
 
-        for (var i = 0; i < InterestDirections; i++)
-        {
-            steering.Interest[i] = 0f;
-            steering.Danger[i] = 0f;
-        }
-
+        // TODO: This should be fly
         steering.CanSeek = true;
 
         var ev = new NPCSteeringEvent(steering, xform, worldPos, offsetRot);
@@ -358,9 +360,10 @@ public sealed partial class NPCSteeringSystem : SharedNPCSteeringSystem
 
         if (steering.CanSeek && !TrySeek(uid, mover, steering, body, xform, offsetRot, moveSpeed, interest, frameTime, ref forceSteer))
         {
-            SetDirection(mover, steering, Vector2.Zero);
+            SetDirection(uid, mover, steering, Vector2.Zero);
             return;
         }
+
         DebugTools.Assert(!float.IsNaN(interest[0]));
 
         // Don't steer too frequently to avoid twitchiness.
@@ -368,9 +371,9 @@ public sealed partial class NPCSteeringSystem : SharedNPCSteeringSystem
         // I think doing this after all the ops above is best?
         // Originally I had it way above but sometimes mobs would overshoot their tile targets.
 
-        if (!forceSteer && steering.NextSteer > curTime)
+        if (!forceSteer)
         {
-            SetDirection(mover, steering, steering.LastSteerDirection, false);
+            SetDirection(uid, mover, steering, steering.LastSteerDirection, false);
             return;
         }
 
@@ -380,11 +383,8 @@ public sealed partial class NPCSteeringSystem : SharedNPCSteeringSystem
 
         Separation(uid, offsetRot, worldPos, agentRadius, layer, mask, body, xform, danger);
 
-        // Prioritise whichever direction we went last tick if it's a tie-breaker.
-        if (steering.LastSteerIndex != -1)
-        {
-            interest[steering.LastSteerIndex] *= 1.1f;
-        }
+        // Blend last and current tick
+        Blend(steering, frameTime, interest, danger);
 
         // Remove the danger map from the interest map.
         var desiredDirection = -1;
@@ -392,7 +392,7 @@ public sealed partial class NPCSteeringSystem : SharedNPCSteeringSystem
 
         for (var i = 0; i < InterestDirections; i++)
         {
-            var adjustedValue = Math.Clamp(interest[i] - danger[i], 0f, 1f);
+            var adjustedValue = Math.Clamp(steering.Interest[i] - steering.Danger[i], 0f, 1f);
 
             if (adjustedValue > desiredValue)
             {
@@ -408,11 +408,9 @@ public sealed partial class NPCSteeringSystem : SharedNPCSteeringSystem
             resultDirection = new Angle(desiredDirection * InterestRadians).ToVec();
         }
 
-        steering.NextSteer = curTime + TimeSpan.FromSeconds(1f / NPCSteeringComponent.SteeringFrequency);
         steering.LastSteerDirection = resultDirection;
-        steering.LastSteerIndex = desiredDirection;
         DebugTools.Assert(!float.IsNaN(resultDirection.X));
-        SetDirection(mover, steering, resultDirection, false);
+        SetDirection(uid, mover, steering, resultDirection, false);
     }
 
     private EntityCoordinates GetCoordinates(PathPoly poly)
@@ -475,8 +473,8 @@ public sealed partial class NPCSteeringSystem : SharedNPCSteeringSystem
             return;
         }
 
-        var targetPos = steering.Coordinates.ToMap(EntityManager, _transform);
-        var ourPos = xform.MapPosition;
+        var targetPos = _transform.ToMapCoordinates(steering.Coordinates);
+        var ourPos = _transform.GetMapCoordinates(uid, xform: xform);
 
         PrunePath(uid, ourPos, targetPos.Position - ourPos.Position, result.Path);
         steering.CurrentPath = new Queue<PathPoly>(result.Path);

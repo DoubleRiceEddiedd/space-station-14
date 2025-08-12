@@ -1,13 +1,15 @@
-using Content.Server.Atmos.Piping.Unary.Components;
-using Content.Server.Station.Components;
-using Content.Shared.Chemistry.Components;
-using Content.Shared.Chemistry.Reagent;
-using JetBrains.Annotations;
-using Robust.Shared.Random;
 using System.Linq;
+using Content.Server.Atmos.Piping.Unary.Components;
 using Content.Server.Fluids.EntitySystems;
-using Content.Server.GameTicking.Rules.Components;
 using Content.Server.StationEvents.Components;
+using Content.Shared.Chemistry.Components;
+using Content.Shared.Chemistry.Reaction;
+using Content.Shared.Chemistry.Reagent;
+using Content.Shared.GameTicking.Components;
+using Content.Shared.Station.Components;
+using JetBrains.Annotations;
+using Robust.Shared.Prototypes;
+using Robust.Shared.Random;
 
 namespace Content.Server.StationEvents.Events;
 
@@ -26,12 +28,9 @@ public sealed class VentClogRule : StationEventSystem<VentClogRuleComponent>
         // TODO: "safe random" for chems. Right now this includes admin chemicals.
         var allReagents = PrototypeManager.EnumeratePrototypes<ReagentPrototype>()
             .Where(x => !x.Abstract)
-            .Select(x => x.ID).ToList();
+            .Select(x => new ProtoId<ReagentPrototype>(x.ID)).ToList();
 
-        // TODO: This is gross, but not much can be done until event refactor, which needs Dynamic.
-        var mod = (float) Math.Sqrt(GetSeverityModifier());
-
-        foreach (var (_, transform) in EntityManager.EntityQuery<GasVentPumpComponent, TransformComponent>())
+        foreach (var (_, transform) in EntityQuery<GasVentPumpComponent, TransformComponent>())
         {
             if (CompOrNull<StationMemberComponent>(transform.GridUid)?.Station != chosenStation)
             {
@@ -40,17 +39,17 @@ public sealed class VentClogRule : StationEventSystem<VentClogRuleComponent>
 
             var solution = new Solution();
 
-            if (!RobustRandom.Prob(Math.Min(0.33f * mod, 1.0f)))
+            if (!RobustRandom.Prob(0.33f))
                 continue;
 
-            var pickAny = RobustRandom.Prob(Math.Min(0.05f * mod, 1.0f));
+            var pickAny = RobustRandom.Prob(0.05f);
             var reagent = RobustRandom.Pick(pickAny ? allReagents : component.SafeishVentChemicals);
 
             var weak = component.WeakReagents.Contains(reagent);
-            var quantity = (weak ? component.WeakReagentQuantity : component.ReagentQuantity) * mod;
+            var quantity = weak ? component.WeakReagentQuantity : component.ReagentQuantity;
             solution.AddReagent(reagent, quantity);
 
-            var foamEnt = Spawn("Foam", transform.Coordinates);
+            var foamEnt = Spawn(ChemicalReactionSystem.FoamReaction, transform.Coordinates);
             var spreadAmount = weak ? component.WeakSpread : component.Spread;
             _smoke.StartSmoke(foamEnt, solution, component.Time, spreadAmount);
             Audio.PlayPvs(component.Sound, transform.Coordinates);

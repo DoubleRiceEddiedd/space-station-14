@@ -1,17 +1,20 @@
 using System.Linq;
 using Content.Server.Administration.Managers;
+using Content.Server.Hands.Systems;
 using Content.Server.Popups;
 using Content.Shared.Administration;
 using Content.Shared.Administration.Logs;
 using Content.Shared.Database;
-using Content.Shared.Hands.Components;
+using Content.Shared.Inventory.VirtualItem;
 using Content.Shared.Verbs;
+using Robust.Shared.Utility;
 
 namespace Content.Server.Verbs
 {
     public sealed class VerbSystem : SharedVerbSystem
     {
         [Dependency] private readonly ISharedAdminLogManager _adminLogger = default!;
+        [Dependency] private readonly HandsSystem _hands = default!;
         [Dependency] private readonly PopupSystem _popupSystem = default!;
         [Dependency] private readonly IAdminManager _adminMgr = default!;
 
@@ -26,7 +29,7 @@ namespace Content.Server.Verbs
         {
             var player = eventArgs.SenderSession;
 
-            if (!EntityManager.EntityExists(GetEntity(args.EntityUid)))
+            if (!Exists(GetEntity(args.EntityUid)))
             {
                 Log.Warning($"{nameof(HandleVerbRequest)} called on a non-existent entity with id {args.EntityUid} by player {player}.");
                 return;
@@ -58,7 +61,7 @@ namespace Content.Server.Verbs
 
             var response =
                 new VerbsResponseEvent(args.EntityUid, GetLocalVerbs(GetEntity(args.EntityUid), attached, verbTypes, force));
-            RaiseNetworkEvent(response, player.ConnectedClient);
+            RaiseNetworkEvent(response, player.Channel);
         }
 
         /// <summary>
@@ -74,7 +77,7 @@ namespace Content.Server.Verbs
             {
                 // Send an informative pop-up message
                 if (!string.IsNullOrWhiteSpace(verb.Message))
-                    _popupSystem.PopupEntity(verb.Message, user, user);
+                    _popupSystem.PopupEntity(FormattedMessage.RemoveMarkupOrThrow(verb.Message), user, user);
 
                 return;
             }
@@ -89,14 +92,13 @@ namespace Content.Server.Verbs
         {
             // first get the held item. again.
             EntityUid? holding = null;
-            if (TryComp(user, out HandsComponent? hands) &&
-                hands.ActiveHandEntity is EntityUid heldEntity)
+            if (_hands.GetActiveItem(user) is { } heldEntity)
             {
                 holding = heldEntity;
             }
 
             // if this is a virtual pull, get the held entity
-            if (holding != null && TryComp(holding, out HandVirtualItemComponent? pull))
+            if (holding != null && TryComp(holding, out VirtualItemComponent? pull))
                 holding = pull.BlockingEntity;
 
             var verbText = $"{verb.Category?.Text} {verb.Text}".Trim();

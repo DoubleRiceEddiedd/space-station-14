@@ -1,4 +1,5 @@
-﻿using System.Numerics;
+using System.Linq;
+using System.Numerics;
 using Content.Client.UserInterface.Controls;
 using Content.Shared.DeviceLinking;
 using Content.Shared.DeviceNetwork;
@@ -7,31 +8,35 @@ using Robust.Client.Graphics;
 using Robust.Client.UserInterface;
 using Robust.Client.UserInterface.Controls;
 using Robust.Client.UserInterface.XAML;
+using Robust.Shared.Prototypes;
 
 namespace Content.Client.NetworkConfigurator;
 
 [GenerateTypedNameReferences]
 public sealed partial class NetworkConfiguratorLinkMenu : FancyWindow
 {
+    [Dependency] private readonly IPrototypeManager _prototypeManager = default!;
+
     private const string PanelBgColor = "#202023";
 
     private readonly LinksRender _links;
-
 
     private readonly List<SourcePortPrototype> _sources = new();
 
     private readonly List<SinkPortPrototype> _sinks = new();
 
-    private readonly NetworkConfiguratorBoundUserInterface _userInterface;
-
     private (ButtonPosition position, string id, int index)? _selectedButton;
 
     private List<(string left, string right)>? _defaults;
 
-    public NetworkConfiguratorLinkMenu(NetworkConfiguratorBoundUserInterface userInterface)
+    public event Action? OnClearLinks;
+    public event Action<string, string>? OnToggleLink;
+    public event Action<List<(string left, string right)>>? OnLinkDefaults;
+
+    public NetworkConfiguratorLinkMenu()
     {
-        _userInterface = userInterface;
         RobustXamlLoader.Load(this);
+        IoCManager.InjectDependencies(this);
 
         var footerStyleBox = new StyleBoxFlat()
         {
@@ -51,7 +56,7 @@ public sealed partial class NetworkConfiguratorLinkMenu : FancyWindow
 
         ButtonOk.OnPressed += _ => Close();
         ButtonLinkDefault.OnPressed += _ => LinkDefaults();
-        ButtonClear.OnPressed += _ => _userInterface.SendMessage(new NetworkConfiguratorClearLinksMessage());
+        ButtonClear.OnPressed += _ => OnClearLinks?.Invoke();
     }
 
     public void UpdateState(DeviceLinkUserInterfaceState linkState)
@@ -60,7 +65,7 @@ public sealed partial class NetworkConfiguratorLinkMenu : FancyWindow
         ButtonContainerRight.RemoveAllChildren();
 
         _sources.Clear();
-        _sources.AddRange(linkState.Sources);
+        _sources.AddRange(linkState.Sources.Select(s => _prototypeManager.Index(s)));
         _links.SourceButtons.Clear();
         var i = 0;
         foreach (var source in _sources)
@@ -72,7 +77,7 @@ public sealed partial class NetworkConfiguratorLinkMenu : FancyWindow
         }
 
         _sinks.Clear();
-        _sinks.AddRange(linkState.Sinks);
+        _sinks.AddRange(linkState.Sinks.Select(s => _prototypeManager.Index(s)));
         _links.SinkButtons.Clear();
         i = 0;
         foreach (var sink in _sinks)
@@ -97,7 +102,7 @@ public sealed partial class NetworkConfiguratorLinkMenu : FancyWindow
         if (_defaults == default)
             return;
 
-        _userInterface.SendMessage(new NetworkConfiguratorLinksSaveMessage(_defaults));
+        OnLinkDefaults?.Invoke(_defaults);
     }
 
     private Button CreateButton(ButtonPosition position, string name, string description, string id, int index)
@@ -137,7 +142,7 @@ public sealed partial class NetworkConfiguratorLinkMenu : FancyWindow
         var left = _selectedButton.Value.position == ButtonPosition.Left ? _selectedButton.Value.id : id;
         var right = _selectedButton.Value.position == ButtonPosition.Left ? id : _selectedButton.Value.id;
 
-        _userInterface.SendMessage(new NetworkConfiguratorToggleLinkMessage(left, right));
+        OnToggleLink?.Invoke(left, right);
 
         args.Button.Pressed = false;
 
@@ -160,7 +165,7 @@ public sealed partial class NetworkConfiguratorLinkMenu : FancyWindow
     /// </summary>
     private sealed class LinksRender : Control
     {
-        public readonly List<(string, string)> Links = new();
+        public readonly List<(ProtoId<SourcePortPrototype>, ProtoId<SinkPortPrototype>)> Links = new();
         public readonly Dictionary<string, Button> SourceButtons = new();
         public readonly Dictionary<string, Button> SinkButtons = new();
         private readonly BoxContainer _leftButtonContainer;

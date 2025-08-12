@@ -1,4 +1,4 @@
-# Tool closet
+﻿# Tool closet
 - type: entity
   id: ClosetTool
   name: tool closet
@@ -37,6 +37,19 @@
     stateDoorOpen: emergency_open
     stateDoorClosed: emergency_door
 
+# Emergency N2 closet
+- type: entity
+  id: ClosetEmergencyN2
+  name: emergency nitrogen closet
+  parent: ClosetSteelBase
+  description: It's full of life-saving equipment. Assuming, that is, that you breathe nitrogen.
+  components:
+  - type: Appearance
+  - type: EntityStorageVisuals
+    stateBaseClosed: n2
+    stateDoorOpen: n2_open
+    stateDoorClosed: n2_door
+
 # Fire safety closet
 - type: entity
   id: ClosetFire
@@ -67,9 +80,9 @@
 - type: entity
   id: ClosetJanitorBomb
   name: janitorial bomb suit closet
-  parent: ClosetBase
+  parent: ClosetSteelBase
   description: It's a storage unit for janitorial explosion-protective suits.
-  suffix: DO NOT MAP
+  categories: [ DoNotMap ]
   components:
   - type: Appearance
   - type: EntityStorageVisuals
@@ -91,6 +104,17 @@
     stateBaseClosed: bio
     stateDoorOpen: bio_open
     stateDoorClosed: bio_door
+
+# Science Variant
+- type: entity
+  id: ClosetL3Science
+  parent: ClosetL3
+  components:
+  - type: Appearance
+  - type: EntityStorageVisuals
+    stateBaseClosed: bio_sci
+    stateDoorOpen: bio_sci_open
+    stateDoorClosed: bio_sci_door
 
 # Virology variant
 - type: entity
@@ -137,6 +161,19 @@
     stateDoorOpen: generic_open
     stateDoorClosed: generic_door
 
+# Syndicate
+- type: entity
+  id: LockerSyndicate
+  name: armory closet
+  parent: ClosetSteelBase
+  description: It's a storage unit.
+  components:
+  - type: Appearance
+  - type: EntityStorageVisuals
+    stateBaseClosed: syndicate
+    stateDoorOpen: syndicate_open
+    stateDoorClosed: syndicate_door
+
 # Bluespace closet
 - type: entity
   id: ClosetBluespace
@@ -145,6 +182,7 @@
   parent: ClosetMaintenance
   description: It's a storage unit... right?
   components:
+    - type: ArrivalsBlacklist
     - type: BluespaceLocker
       pickLinksFromSameMap: true
       minBluespaceLinks: 1
@@ -163,6 +201,7 @@
   parent: ClosetMaintenance
   description: It's a storage unit... right?
   components:
+    - type: ArrivalsBlacklist
     - type: BluespaceLocker
       pickLinksFromSameMap: true
       minBluespaceLinks: 1

@@ -10,6 +10,8 @@ namespace Content.Client.Drunk;
 
 public sealed class DrunkOverlay : Overlay
 {
+    private static readonly ProtoId<ShaderPrototype> Shader = "Drunk";
+
     [Dependency] private readonly IEntityManager _entityManager = default!;
     [Dependency] private readonly IPrototypeManager _prototypeManager = default!;
     [Dependency] private readonly IPlayerManager _playerManager = default!;
@@ -30,13 +32,13 @@ public sealed class DrunkOverlay : Overlay
     public DrunkOverlay()
     {
         IoCManager.InjectDependencies(this);
-        _drunkShader = _prototypeManager.Index<ShaderPrototype>("Drunk").InstanceUnique();
+        _drunkShader = _prototypeManager.Index(Shader).InstanceUnique();
     }
 
     protected override void FrameUpdate(FrameEventArgs args)
     {
 
-        var playerEntity = _playerManager.LocalPlayer?.ControlledEntity;
+        var playerEntity = _playerManager.LocalEntity;
 
         if (playerEntity == null)
             return;
@@ -58,7 +60,7 @@ public sealed class DrunkOverlay : Overlay
 
     protected override bool BeforeDraw(in OverlayDrawArgs args)
     {
-        if (!_entityManager.TryGetComponent(_playerManager.LocalPlayer?.ControlledEntity, out EyeComponent? eyeComp))
+        if (!_entityManager.TryGetComponent(_playerManager.LocalEntity, out EyeComponent? eyeComp))
             return false;
 
         if (args.Viewport.Eye != eyeComp.Eye)

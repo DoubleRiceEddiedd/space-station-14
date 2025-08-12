@@ -16,8 +16,7 @@ public sealed class CrewManifestCartridgeSystem : EntitySystem
     [Dependency] private readonly CrewManifestSystem _crewManifest = default!;
     [Dependency] private readonly StationSystem _stationSystem = default!;
 
-    [ValidatePrototypeId<EntityPrototype>]
-    private const string CartridgePrototypeName = "CrewManifestCartridge";
+    private static readonly EntProtoId CartridgePrototypeName = "CrewManifestCartridge";
 
     /// <summary>
     /// Flag that shows that if crew manifest is allowed to be viewed from 'unsecure' entities,
@@ -31,7 +30,7 @@ public sealed class CrewManifestCartridgeSystem : EntitySystem
         SubscribeLocalEvent<CrewManifestCartridgeComponent, CartridgeMessageEvent>(OnUiMessage);
         SubscribeLocalEvent<CrewManifestCartridgeComponent, CartridgeUiReadyEvent>(OnUiReady);
         SubscribeLocalEvent<ProgramInstallationAttempt>(OnInstallationAttempt);
-        _configManager.OnValueChanged(CCVars.CrewManifestUnsecure, OnCrewManifestUnsecureChanged, true);
+        Subs.CVar(_configManager, CCVars.CrewManifestUnsecure, OnCrewManifestUnsecureChanged, true);
     }
 
     /// <summary>
@@ -91,11 +90,5 @@ public sealed class CrewManifestCartridgeSystem : EntitySystem
             if (_cartridgeLoader.TryGetProgram<CrewManifestCartridgeComponent>(loaderUid, out var program, true, comp, cont))
                 _cartridgeLoader.UninstallProgram(loaderUid, program.Value, comp);
         }
-    }
-
-    public override void Shutdown()
-    {
-        base.Shutdown();
-        _configManager.UnsubValueChanged(CCVars.CrewManifestUnsecure, OnCrewManifestUnsecureChanged);
     }
 }

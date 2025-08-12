@@ -3,13 +3,16 @@ using System.Numerics;
 using Content.Client.Gameplay;
 using Content.Client.Hands.Systems;
 using Content.Client.Inventory;
+using Content.Client.Storage.Systems;
 using Content.Client.UserInterface.Controls;
 using Content.Client.UserInterface.Systems.Gameplay;
 using Content.Client.UserInterface.Systems.Inventory.Controls;
 using Content.Client.UserInterface.Systems.Inventory.Widgets;
 using Content.Client.UserInterface.Systems.Inventory.Windows;
+using Content.Shared.Containers.ItemSlots;
 using Content.Shared.Hands.Components;
 using Content.Shared.Input;
+using Content.Shared.Inventory.VirtualItem;
 using Content.Shared.Storage;
 using Robust.Client.GameObjects;
 using Robust.Client.UserInterface;
@@ -31,6 +34,7 @@ public sealed class InventoryUIController : UIController, IOnStateEntered<Gamepl
     [UISystemDependency] private readonly ClientInventorySystem _inventorySystem = default!;
     [UISystemDependency] private readonly HandsSystem _handsSystem = default!;
     [UISystemDependency] private readonly ContainerSystem _container = default!;
+    [UISystemDependency] private readonly SpriteSystem _sprite = default!;
 
     private EntityUid? _playerUid;
     private InventorySlotsComponent? _playerInventory;
@@ -55,8 +59,8 @@ public sealed class InventoryUIController : UIController, IOnStateEntered<Gamepl
         if (UIManager.ActiveScreen == null)
             return;
 
-        var inventoryGui = UIManager.GetActiveUIWidget<InventoryGui>();
-        RegisterInventoryButton(inventoryGui.InventoryButton);
+        if (UIManager.GetActiveUIWidgetOrNull<InventoryGui>() is { } inventoryGui)
+            RegisterInventoryButton(inventoryGui.InventoryButton);
     }
 
     public void OnStateEntered(GameplayState state)
@@ -129,6 +133,9 @@ public sealed class InventoryUIController : UIController, IOnStateEntered<Gamepl
         if (clientInv == null)
         {
             _inventoryHotbar?.ClearButtons();
+            if (_inventoryButton != null)
+                _inventoryButton.Visible = false;
+
             return;
         }
 
@@ -187,8 +194,6 @@ public sealed class InventoryUIController : UIController, IOnStateEntered<Gamepl
             }
         }
 
-        return;
-
         int GetIndex(Vector2i position)
         {
             return position.Y * maxWidth + position.X;
@@ -236,12 +241,14 @@ public sealed class InventoryUIController : UIController, IOnStateEntered<Gamepl
     {
         if (_inventoryHotbar == null)
         {
-            Logger.Warning("Tried to toggle inventory bar when none are assigned");
+            Log.Warning("Tried to toggle inventory bar when none are assigned");
             return;
         }
 
         UpdateInventoryHotbar(_playerInventory);
-        _inventoryHotbar.Visible = !_inventoryHotbar.Visible;
+        var shouldBeVisible = !_inventoryHotbar.Visible;
+        _inventoryHotbar.Visible = shouldBeVisible;
+
     }
 
     // Neuron Activation
@@ -320,9 +327,8 @@ public sealed class InventoryUIController : UIController, IOnStateEntered<Gamepl
         var player = _playerUid;
 
         if (!control.MouseIsHovering ||
-            _playerInventory == null ||
-            !_entities.TryGetComponent<HandsComponent>(player, out var hands) ||
-            hands.ActiveHandEntity is not { } held ||
+            player == null ||
+            !_handsSystem.TryGetActiveItem(player.Value, out var held) ||
             !_entities.TryGetComponent(held, out SpriteComponent? sprite) ||
             !_inventorySystem.TryGetSlotContainer(player.Value, control.SlotName, out var container, out var slotDef))
         {
@@ -333,11 +339,30 @@ public sealed class InventoryUIController : UIController, IOnStateEntered<Gamepl
         // Set green / red overlay at 50% transparency
         var hoverEntity = _entities.SpawnEntity("hoverentity", MapCoordinates.Nullspace);
         var hoverSprite = _entities.GetComponent<SpriteComponent>(hoverEntity);
-        var fits = _inventorySystem.CanEquip(player.Value, held, control.SlotName, out _, slotDef) &&
-                   _container.CanInsert(held, container);
+        var fits = _inventorySystem.CanEquip(player.Value, held.Value, control.SlotName, out _, slotDef) &&
+                   _container.CanInsert(held.Value, container);
 
-        hoverSprite.CopyFrom(sprite);
-        hoverSprite.Color = fits ? new Color(0, 255, 0, 127) : new Color(255, 0, 0, 127);
+        if (!fits && _entities.TryGetComponent<StorageComponent>(container.ContainedEntity, out var storage))
+        {
+            fits = _entities.System<StorageSystem>().CanInsert(container.ContainedEntity.Value, held.Value, out _, storage);
+        }
+        else if (!fits && _entities.TryGetComponent<ItemSlotsComponent>(container.ContainedEntity, out var itemSlots))
+        {
+            var itemSlotsSys = _entities.System<ItemSlotsSystem>();
+            foreach (var slot in itemSlots.Slots.Values)
+            {
+                if (!slot.InsertOnInteract)
+                    continue;
+
+                if (!itemSlotsSys.CanInsert(container.ContainedEntity.Value, held.Value, null, slot))
+                    continue;
+                fits = true;
+                break;
+            }
+        }
+
+        _sprite.CopySprite((held.Value, sprite), (hoverEntity, hoverSprite));
+        _sprite.SetColor((hoverEntity, hoverSprite), fits ? new Color(0, 255, 0, 127) : new Color(255, 0, 0, 127));
 
         control.HoverSpriteView.SetEntity(hoverEntity);
     }
@@ -372,6 +397,9 @@ public sealed class InventoryUIController : UIController, IOnStateEntered<Gamepl
         foreach (var slotData in clientInv.SlotData.Values)
         {
             AddSlot(slotData);
+
+            if (_inventoryButton != null)
+                _inventoryButton.Visible = true;
         }
 
         UpdateInventoryHotbar(_playerInventory);
@@ -379,12 +407,17 @@ public sealed class InventoryUIController : UIController, IOnStateEntered<Gamepl
 
     private void UnloadSlots()
     {
+        if (_inventoryButton != null)
+            _inventoryButton.Visible = false;
+
         _playerUid = null;
         _playerInventory = null;
         foreach (var slotGroup in _slotGroups.Values)
         {
             slotGroup.ClearButtons();
         }
+
+        UpdateInventoryHotbar(null);
     }
 
     private void SpriteUpdated(SlotSpriteUpdate update)
@@ -393,15 +426,24 @@ public sealed class InventoryUIController : UIController, IOnStateEntered<Gamepl
 
         if (_strippingWindow?.InventoryButtons.GetButton(update.Name) is { } inventoryButton)
         {
-            inventoryButton.SpriteView.SetEntity(entity);
+            inventoryButton.SetEntity(entity);
             inventoryButton.StorageButton.Visible = showStorage;
         }
 
         if (_slotGroups.GetValueOrDefault(group)?.GetButton(name) is not { } button)
             return;
 
-        button.SpriteView.SetEntity(entity);
-        button.StorageButton.Visible = showStorage;
+        if (_entities.TryGetComponent(entity, out VirtualItemComponent? virtb))
+        {
+            button.SetEntity(virtb.BlockingEntity);
+            button.Blocked = true;
+        }
+        else
+        {
+            button.SetEntity(entity);
+            button.Blocked = false;
+            button.StorageButton.Visible = showStorage;
+        }
     }
 
     public bool RegisterSlotGroupContainer(ItemSlotButtonContainer slotContainer)

@@ -1,13 +1,16 @@
 using System.Linq;
-using Content.Server.Administration.Commands;
+using Content.Server.Clothing.Systems;
 using Content.Server.GameTicking.Rules.Components;
 using Content.Server.KillTracking;
 using Content.Server.Mind;
 using Content.Server.Points;
 using Content.Server.RoundEnd;
 using Content.Server.Station.Systems;
+using Content.Shared.GameTicking;
+using Content.Shared.GameTicking.Components;
 using Content.Shared.Points;
 using Content.Shared.Storage;
+using Robust.Server.GameObjects;
 using Robust.Server.Player;
 using Robust.Shared.Utility;
 
@@ -20,10 +23,12 @@ public sealed class DeathMatchRuleSystem : GameRuleSystem<DeathMatchRuleComponen
 {
     [Dependency] private readonly IPlayerManager _player = default!;
     [Dependency] private readonly MindSystem _mind = default!;
+    [Dependency] private readonly OutfitSystem _outfitSystem = default!;
     [Dependency] private readonly PointSystem _point = default!;
     [Dependency] private readonly RespawnRuleSystem _respawn = default!;
     [Dependency] private readonly RoundEndSystem _roundEnd = default!;
     [Dependency] private readonly StationSpawningSystem _stationSpawning = default!;
+    [Dependency] private readonly TransformSystem _transform = default!;
 
     public override void Initialize()
     {
@@ -33,7 +38,6 @@ public sealed class DeathMatchRuleSystem : GameRuleSystem<DeathMatchRuleComponen
         SubscribeLocalEvent<PlayerSpawnCompleteEvent>(OnSpawnComplete);
         SubscribeLocalEvent<KillReportedEvent>(OnKillReported);
         SubscribeLocalEvent<DeathMatchRuleComponent, PlayerPointChangedEvent>(OnPointChanged);
-        SubscribeLocalEvent<RoundEndTextAppendEvent>(OnRoundEndTextAppend);
     }
 
     private void OnBeforeSpawn(PlayerBeforeSpawnEvent ev)
@@ -52,9 +56,9 @@ public sealed class DeathMatchRuleSystem : GameRuleSystem<DeathMatchRuleComponen
             var mob = mobMaybe!.Value;
 
             _mind.TransferTo(newMind, mob);
-            SetOutfitCommand.SetOutfit(mob, dm.Gear, EntityManager);
+            _outfitSystem.SetOutfit(mob, dm.Gear);
             EnsureComp<KillTrackerComponent>(mob);
-            _respawn.AddToTracker(ev.Player.UserId, uid, tracker);
+            _respawn.AddToTracker(ev.Player.UserId, (uid, tracker));
 
             _point.EnsurePlayer(ev.Player.UserId, uid, point);
 
@@ -71,7 +75,7 @@ public sealed class DeathMatchRuleSystem : GameRuleSystem<DeathMatchRuleComponen
         {
             if (!GameTicker.IsGameRuleActive(uid, rule))
                 continue;
-            _respawn.AddToTracker(ev.Mob, uid, tracker);
+            _respawn.AddToTracker((ev.Mob, null), (uid, tracker));
         }
     }
 
@@ -97,7 +101,7 @@ public sealed class DeathMatchRuleSystem : GameRuleSystem<DeathMatchRuleComponen
                 _point.AdjustPointValue(assist.PlayerId, 1, uid, point);
 
             var spawns = EntitySpawnCollection.GetSpawns(dm.RewardSpawns).Cast<string?>().ToList();
-            EntityManager.SpawnEntities(Transform(ev.Entity).MapPosition, spawns);
+            EntityManager.SpawnEntities(_transform.GetMapCoordinates(ev.Entity), spawns);
         }
     }
 
@@ -113,21 +117,17 @@ public sealed class DeathMatchRuleSystem : GameRuleSystem<DeathMatchRuleComponen
         _roundEnd.EndRound(component.RestartDelay);
     }
 
-    private void OnRoundEndTextAppend(RoundEndTextAppendEvent ev)
+    protected override void AppendRoundEndText(EntityUid uid, DeathMatchRuleComponent component, GameRuleComponent gameRule, ref RoundEndTextAppendEvent args)
     {
-        var query = EntityQueryEnumerator<DeathMatchRuleComponent, PointManagerComponent, GameRuleComponent>();
-        while (query.MoveNext(out var uid, out var dm, out var point, out var rule))
-        {
-            if (!GameTicker.IsGameRuleAdded(uid, rule))
-                continue;
+        if (!TryComp<PointManagerComponent>(uid, out var point))
+            return;
 
-            if (dm.Victor != null && _player.TryGetPlayerData(dm.Victor.Value, out var data))
-            {
-                ev.AddLine(Loc.GetString("point-scoreboard-winner", ("player", data.UserName)));
-                ev.AddLine("");
-            }
-            ev.AddLine(Loc.GetString("point-scoreboard-header"));
-            ev.AddLine(new FormattedMessage(point.Scoreboard).ToMarkup());
+        if (component.Victor != null && _player.TryGetPlayerData(component.Victor.Value, out var data))
+        {
+            args.AddLine(Loc.GetString("point-scoreboard-winner", ("player", data.UserName)));
+            args.AddLine("");
         }
+        args.AddLine(Loc.GetString("point-scoreboard-header"));
+        args.AddLine(new FormattedMessage(point.Scoreboard).ToMarkup());
     }
 }

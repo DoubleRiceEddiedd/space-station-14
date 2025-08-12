@@ -1,185 +1,192 @@
-using System.Linq;
-using Content.Server.Administration.Logs;
 using Content.Server.Atmos.Piping.Components;
 using Content.Server.Atmos.Piping.EntitySystems;
+using Content.Server.Charges;
+using Content.Server.Decals;
+using Content.Server.Destructible;
 using Content.Server.Popups;
+using Content.Shared.Atmos.Piping.Unary.Components;
+using Content.Shared.Charges.Components;
+using Content.Shared.Coordinates.Helpers;
 using Content.Shared.Database;
+using Content.Shared.Decals;
 using Content.Shared.DoAfter;
-using Content.Shared.Doors.Components;
-using Content.Shared.SprayPainter.Prototypes;
-using Content.Shared.SprayPainter;
 using Content.Shared.Interaction;
-using JetBrains.Annotations;
+using Content.Shared.SprayPainter;
+using Content.Shared.SprayPainter.Components;
+using Robust.Server.Audio;
 using Robust.Server.GameObjects;
-using Robust.Shared.Audio;
-using Robust.Shared.Audio.Systems;
-using Robust.Shared.Player;
+using Robust.Shared.Prototypes;
 
 namespace Content.Server.SprayPainter;
 
 /// <summary>
-/// A system for painting airlocks and pipes using enginner painter
+/// Handles spraying pipes and decals using a spray painter.
+/// Other paintable objects are handled in shared.
 /// </summary>
-[UsedImplicitly]
 public sealed class SprayPainterSystem : SharedSprayPainterSystem
 {
-    [Dependency] private readonly IAdminLogManager _adminLogger = default!;
-    [Dependency] private readonly UserInterfaceSystem _userInterfaceSystem = default!;
-    [Dependency] private readonly SharedDoAfterSystem _doAfterSystem = default!;
-    [Dependency] private readonly PopupSystem _popupSystem = default!;
-    [Dependency] private readonly SharedAudioSystem _audio = default!;
-    [Dependency] private readonly SharedAppearanceSystem _appearance = default!;
-    [Dependency] private readonly AtmosPipeColorSystem _pipeColorSystem = default!;
+    [Dependency] private readonly AtmosPipeColorSystem _pipeColor = default!;
+    [Dependency] private readonly PopupSystem _popup = default!;
+    [Dependency] private readonly DecalSystem _decals = default!;
+    [Dependency] private readonly AudioSystem _audio = default!;
+    [Dependency] private readonly ChargesSystem _charges = default!;
+    [Dependency] private readonly TransformSystem _transform = default!;
 
     public override void Initialize()
     {
         base.Initialize();
 
-        SubscribeLocalEvent<SprayPainterComponent, ComponentInit>(OnInit);
-        SubscribeLocalEvent<SprayPainterComponent, AfterInteractEvent>(AfterInteractOn);
-        SubscribeLocalEvent<SprayPainterComponent, ActivateInWorldEvent>(OnActivate);
-        SubscribeLocalEvent<SprayPainterComponent, SprayPainterSpritePickedMessage>(OnSpritePicked);
-        SubscribeLocalEvent<SprayPainterComponent, SprayPainterColorPickedMessage>(OnColorPicked);
-        SubscribeLocalEvent<SprayPainterComponent, SprayPainterDoAfterEvent>(OnDoAfter);
+        SubscribeLocalEvent<SprayPainterComponent, SprayPainterPipeDoAfterEvent>(OnPipeDoAfter);
+        SubscribeLocalEvent<SprayPainterComponent, AfterInteractEvent>(OnFloorAfterInteract);
+        SubscribeLocalEvent<AtmosPipeColorComponent, InteractUsingEvent>(OnPipeInteract);
+        SubscribeLocalEvent<GasCanisterComponent, EntityPaintedEvent>(OnCanisterPainted);
     }
 
-    private void OnInit(EntityUid uid, SprayPainterComponent component, ComponentInit args)
+    /// <summary>
+    /// Handles drawing decals when a spray painter is used to interact with the floor.
+    /// Spray painter must have decal painting enabled and enough charges of paint to paint on the floor.
+    /// </summary>
+    private void OnFloorAfterInteract(Entity<SprayPainterComponent> ent, ref AfterInteractEvent args)
     {
-        if (component.ColorPalette.Count == 0)
+        if (args.Handled || !args.CanReach || args.Target != null)
             return;
 
-        SetColor(uid, component, component.ColorPalette.First().Key);
+        // Includes both off and all other don't cares
+        if (ent.Comp.DecalMode != DecalPaintMode.Add && ent.Comp.DecalMode != DecalPaintMode.Remove)
+            return;
+
+        args.Handled = true;
+        if (TryComp(ent, out LimitedChargesComponent? charges) && charges.LastCharges < ent.Comp.DecalChargeCost)
+        {
+            _popup.PopupEntity(Loc.GetString("spray-painter-interact-no-charges"), args.User, args.User);
+            return;
+        }
+
+        var position = args.ClickLocation;
+        if (ent.Comp.SnapDecals)
+            position = position.SnapToGrid(EntityManager);
+
+        if (ent.Comp.DecalMode == DecalPaintMode.Add)
+        {
+            // Offset painting for adding decals
+            position = position.Offset(new(-0.5f));
+
+            if (!_decals.TryAddDecal(ent.Comp.SelectedDecal, position, out _, ent.Comp.SelectedDecalColor, Angle.FromDegrees(ent.Comp.SelectedDecalAngle), 0, false))
+                return;
+        }
+        else
+        {
+            var gridUid = _transform.GetGrid(args.ClickLocation);
+            if (gridUid is not { } grid || !TryComp<DecalGridComponent>(grid, out var decalGridComp))
+            {
+                _popup.PopupEntity(Loc.GetString("spray-painter-interact-nothing-to-remove"), args.User, args.User);
+                return;
+            }
+
+            var decals = _decals.GetDecalsInRange(grid, position.Position, validDelegate: IsDecalRemovable);
+            if (decals.Count <= 0)
+            {
+                _popup.PopupEntity(Loc.GetString("spray-painter-interact-nothing-to-remove"), args.User, args.User);
+                return;
+            }
+
+            foreach (var decal in decals)
+            {
+                _decals.RemoveDecal(grid, decal.Index, decalGridComp);
+            }
+        }
+
+        _audio.PlayPvs(ent.Comp.SpraySound, ent);
+
+        _charges.TryUseCharges((ent, charges), ent.Comp.DecalChargeCost);
+
+        AdminLogger.Add(LogType.CrayonDraw, LogImpact.Low, $"{EntityManager.ToPrettyString(args.User):user} painted a {ent.Comp.SelectedDecal}");
     }
 
-    private void OnDoAfter(EntityUid uid, SprayPainterComponent component, SprayPainterDoAfterEvent args)
+    /// <summary>
+    /// Handles drawing decals when a spray painter is used to interact with the floor.
+    /// Spray painter must have decal painting enabled and enough charges of paint to paint on the floor.
+    /// </summary>
+    private bool IsDecalRemovable(Decal decal)
     {
-        component.IsSpraying = false;
+        if (!Proto.TryIndex<DecalPrototype>(decal.Id, out var decalProto))
+            return false;
 
+        return (decalProto.Tags.Contains("station")
+            || decalProto.Tags.Contains("markings"))
+            && !decalProto.Tags.Contains("dirty");
+    }
+
+    /// <summary>
+    /// Event handler when gas canisters are painted.
+    /// The canister's color should not change when it's destroyed.
+    /// </summary>
+    private void OnCanisterPainted(Entity<GasCanisterComponent> ent, ref EntityPaintedEvent args)
+    {
+        var dummy = Spawn(args.Prototype);
+
+        var destructibleComp = EnsureComp<DestructibleComponent>(dummy);
+        CopyComp(dummy, ent, destructibleComp);
+
+        Del(dummy);
+    }
+
+    private void OnPipeDoAfter(Entity<SprayPainterComponent> ent, ref SprayPainterPipeDoAfterEvent args)
+    {
         if (args.Handled || args.Cancelled)
             return;
 
-        if (args.Args.Target == null)
+        if (args.Args.Target is not { } target)
             return;
 
-        EntityUid target = (EntityUid) args.Args.Target;
+        if (!TryComp<AtmosPipeColorComponent>(target, out var color))
+            return;
 
-        _audio.PlayPvs(component.SpraySound, uid);
+        if (TryComp<LimitedChargesComponent>(ent, out var charges) &&
+            !_charges.TryUseCharges((ent, charges), ent.Comp.PipeChargeCost))
+            return;
 
-        if (TryComp<AtmosPipeColorComponent>(target, out var atmosPipeColorComp))
-        {
-            _pipeColorSystem.SetColor(target, atmosPipeColorComp, args.Color ?? Color.White);
-        } else { // Target is an airlock
-            if (args.Sprite != null)
-            {
-                _appearance.SetData(target, DoorVisuals.BaseRSI, args.Sprite);
-                _adminLogger.Add(LogType.Action, LogImpact.Low, $"{ToPrettyString(args.Args.User):user} painted {ToPrettyString(args.Args.Target.Value):target}");
-            }
-        }
+        Audio.PlayPvs(ent.Comp.SpraySound, ent);
+        _pipeColor.SetColor(target, color, args.Color);
 
         args.Handled = true;
     }
 
-    private void OnActivate(EntityUid uid, SprayPainterComponent component, ActivateInWorldEvent args)
+    private void OnPipeInteract(Entity<AtmosPipeColorComponent> ent, ref InteractUsingEvent args)
     {
-        if (!EntityManager.TryGetComponent(args.User, out ActorComponent? actor))
-            return;
-        DirtyUI(uid, component);
-
-        _userInterfaceSystem.TryOpen(uid, SprayPainterUiKey.Key, actor.PlayerSession);
-        args.Handled = true;
-    }
-
-    private void AfterInteractOn(EntityUid uid, SprayPainterComponent component, AfterInteractEvent args)
-    {
-        if (component.IsSpraying || args.Target is not { Valid: true } target || !args.CanReach)
+        if (args.Handled)
             return;
 
-        if (EntityManager.TryGetComponent<PaintableAirlockComponent>(target, out var airlock))
+        if (!TryComp<SprayPainterComponent>(args.Used, out var painter) ||
+            painter.PickedColor is not { } colorName)
+            return;
+
+        if (!painter.ColorPalette.TryGetValue(colorName, out var color))
+            return;
+
+        if (TryComp<LimitedChargesComponent>(args.Used, out var charges)
+            && charges.LastCharges < painter.PipeChargeCost)
         {
-            if (!_prototypeManager.TryIndex<AirlockGroupPrototype>(airlock.Group, out var grp))
-            {
-                Log.Error("Group not defined: %s", airlock.Group);
-                return;
-            }
-
-            string style = Styles[component.Index];
-            if (!grp.StylePaths.TryGetValue(style, out var sprite))
-            {
-                string msg = Loc.GetString("spray-painter-style-not-available");
-                _popupSystem.PopupEntity(msg, args.User, args.User);
-                return;
-            }
-            component.IsSpraying = true;
-
-            var doAfterEventArgs = new DoAfterArgs(EntityManager, args.User, component.AirlockSprayTime, new SprayPainterDoAfterEvent(sprite, null), uid, target: target, used: uid)
-            {
-                BreakOnTargetMove = true,
-                BreakOnUserMove = true,
-                BreakOnDamage = true,
-                NeedHand = true,
-            };
-            _doAfterSystem.TryStartDoAfter(doAfterEventArgs);
-
-            // Log attempt
-            _adminLogger.Add(LogType.Action, LogImpact.Low, $"{ToPrettyString(args.User):user} is painting {ToPrettyString(uid):target} to '{style}' at {Transform(uid).Coordinates:targetlocation}");
-        } else { // Painting pipes
-            if(component.PickedColor is null)
-                return;
-
-            if (!EntityManager.HasComponent<AtmosPipeColorComponent>(target))
-                return;
-
-            if(!component.ColorPalette.TryGetValue(component.PickedColor, out var color))
-                return;
-
-            var doAfterEventArgs = new DoAfterArgs(EntityManager, args.User, component.PipeSprayTime, new SprayPainterDoAfterEvent(null, color), uid, target, uid)
-            {
-                BreakOnTargetMove = true,
-                BreakOnUserMove = true,
-                BreakOnDamage = true,
-                CancelDuplicate = true,
-                DuplicateCondition = DuplicateConditions.SameTarget,
-                NeedHand = true,
-            };
-
-            _doAfterSystem.TryStartDoAfter(doAfterEventArgs);
+            var msg = Loc.GetString("spray-painter-interact-no-charges");
+            _popup.PopupEntity(msg, args.User, args.User);
+            return;
         }
-    }
 
-    private void OnColorPicked(EntityUid uid, SprayPainterComponent component, SprayPainterColorPickedMessage args)
-    {
-        SetColor(uid, component, args.Key);
-    }
+        var doAfterEventArgs = new DoAfterArgs(EntityManager,
+            args.User,
+            painter.PipeSprayTime,
+            new SprayPainterPipeDoAfterEvent(color),
+            args.Used,
+            target: ent,
+            used: args.Used)
+        {
+            BreakOnMove = true,
+            BreakOnDamage = true,
+            // multiple pipes can be sprayed at once just not the same one
+            DuplicateCondition = DuplicateConditions.SameTarget,
+            NeedHand = true,
+        };
 
-    private void OnSpritePicked(EntityUid uid, SprayPainterComponent component, SprayPainterSpritePickedMessage args)
-    {
-        component.Index = args.Index;
-        DirtyUI(uid, component);
-    }
-
-    private void SetColor(EntityUid uid, SprayPainterComponent component, string? paletteKey)
-    {
-        if (paletteKey == null)
-            return;
-
-        if (!component.ColorPalette.ContainsKey(paletteKey) || paletteKey == component.PickedColor)
-            return;
-
-        component.PickedColor = paletteKey;
-        DirtyUI(uid, component);
-    }
-
-    private void DirtyUI(EntityUid uid, SprayPainterComponent? component = null)
-    {
-        if (!Resolve(uid, ref component))
-            return;
-
-        _userInterfaceSystem.TrySetUiState(
-            uid,
-            SprayPainterUiKey.Key,
-            new SprayPainterBoundUserInterfaceState(
-                component.Index,
-                component.PickedColor,
-                component.ColorPalette));
+        args.Handled = DoAfter.TryStartDoAfter(doAfterEventArgs);
     }
 }

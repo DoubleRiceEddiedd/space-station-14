@@ -35,7 +35,7 @@
       visible: false
       map: ["enum.FatExtractorVisualLayers.Smoke"]
   - type: Lock
-    breakOnEmag: false
+    breakOnAccessBreaker: false
   - type: GenericVisualizer
     visuals:
       enum.StorageVisuals.Open:
@@ -80,14 +80,17 @@
     containers:
      - entity_storage
   - type: Damageable
-    damageContainer: Inorganic
-    damageModifierSet: StrongMetallic
+    damageContainer: StructuralInorganic
+    damageModifierSet: StructuralMetallicStrong
   - type: Destructible
     thresholds:
     - trigger:
         !type:DamageTrigger
         damage: 100
       behaviors:
+      - !type:PlaySoundBehavior
+        sound:
+          collection: MetalGlassBreak
       - !type:ChangeConstructionNodeBehavior
         node: machineFrame
       - !type:DoActsBehavior
@@ -95,14 +98,14 @@
   - type: Machine
     board: FatExtractorMachineCircuitboard
   - type: WiresPanel
-  - type: Wires
-    boardName: wires-board-name-fatextractor
-    layoutId: FatExtractor
   - type: Appearance
   - type: Speech
     speechVerb: Robotic
-  - type: Advertise
-    pack: FatExtractorFacts
+  - type: Vocalizer
+    hideChat: true
+  - type: VocalizerRequiresPower
+  - type: DatasetVocalizer
+    dataset: FatExtractorFacts
   - type: StaticPrice
     price: 1000
   - type: ResistLocker

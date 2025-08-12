@@ -23,21 +23,20 @@ public sealed class NetworkConfiguratorSystem : SharedNetworkConfiguratorSystem
     [Dependency] private readonly ActionsSystem _actions = default!;
     [Dependency] private readonly IInputManager _inputManager = default!;
 
-    [ValidatePrototypeId<EntityPrototype>]
-    private const string Action = "ActionClearNetworkLinkOverlays";
+    private static readonly EntProtoId Action = "ActionClearNetworkLinkOverlays";
 
     public override void Initialize()
     {
         base.Initialize();
 
         SubscribeLocalEvent<ClearAllOverlaysEvent>(_ => ClearAllOverlays());
-        SubscribeLocalEvent<NetworkConfiguratorComponent, ItemStatusCollectMessage>(OnCollectItemStatus);
+        Subs.ItemStatus<NetworkConfiguratorComponent>(OnCollectItemStatus);
     }
 
-    private void OnCollectItemStatus(EntityUid uid, NetworkConfiguratorComponent configurator, ItemStatusCollectMessage args)
+    private Control OnCollectItemStatus(Entity<NetworkConfiguratorComponent> entity)
     {
         _inputManager.TryGetKeyBinding((ContentKeyFunctions.AltUseItemInHand), out var binding);
-        args.Controls.Add(new StatusControl(configurator, binding?.GetKeyString() ?? ""));
+        return new StatusControl(entity, binding?.GetKeyString() ?? "");
     }
 
     public bool ConfiguredListIsTracked(EntityUid uid, NetworkConfiguratorComponent? component = null)
@@ -52,8 +51,7 @@ public sealed class NetworkConfiguratorSystem : SharedNetworkConfiguratorSystem
     /// </summary>
     public void ToggleVisualization(EntityUid uid, bool toggle, NetworkConfiguratorComponent? component = null)
     {
-        if (_playerManager.LocalPlayer == null
-            || _playerManager.LocalPlayer.ControlledEntity == null
+        if (_playerManager.LocalEntity == null
             || !Resolve(uid, ref component)
             || component.ActiveDeviceList == null)
             return;
@@ -77,7 +75,7 @@ public sealed class NetworkConfiguratorSystem : SharedNetworkConfiguratorSystem
         {
             var overlay = new NetworkConfiguratorLinkOverlay();
             _overlay.AddOverlay(overlay);
-            var player = _playerManager.LocalPlayer.ControlledEntity.Value;
+            var player = _playerManager.LocalEntity.Value;
             overlay.Action = Spawn(Action);
             _actions.AddActionDirect(player, overlay.Action.Value);
         }
@@ -138,13 +136,14 @@ public sealed class NetworkConfiguratorSystem : SharedNetworkConfiguratorSystem
     }
 }
 
-public sealed class ClearAllNetworkLinkOverlays : IConsoleCommand
+public sealed class ClearAllNetworkLinkOverlays : LocalizedEntityCommands
 {
-    public string Command => "clearnetworklinkoverlays";
-    public string Description => "Clear all network link overlays.";
-    public string Help => Command;
-    public void Execute(IConsoleShell shell, string argStr, string[] args)
+    [Dependency] private readonly NetworkConfiguratorSystem _network = default!;
+
+    public override string Command => "clearnetworklinkoverlays";
+
+    public override void Execute(IConsoleShell shell, string argStr, string[] args)
     {
-        IoCManager.Resolve<IEntityManager>().System<NetworkConfiguratorSystem>().ClearAllOverlays();
+        _network.ClearAllOverlays();
     }
 }
